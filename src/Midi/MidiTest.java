@@ -82,13 +82,15 @@ class MidiTest {
         // First event: Set Tempo (FF 51 03 tttttt(6 bytes, in ms per MIDI 1/4 note))
         var firstEvent = firstTrack.events.get(0);
         assertEquals(0, firstEvent.ticks);
-        assertEquals(MidiEventType.SET_TEMPO, firstEvent.type);
+        assertEquals(MidiEventType.META, firstEvent.type);
+        assertEquals(MidiEventSubType.SET_TEMPO, firstEvent.subType);
         assertEquals(6, firstEvent.nbytes());
         assertEquals("FF5103061A80", firstEvent.message);
 
         // Verify that the last event in the first track is the End of Track event (0xff, 0x2f, 0x00)
         var lastEvent = firstTrack.events.get(firstTrack.events.size()-1);
         assertEquals(MidiEventType.META, lastEvent.type);
+        assertEquals(MidiEventSubType.END_OF_TRACK, lastEvent.subType);
         assertEquals(3, lastEvent.nbytes());
         assertEquals("FF2F00", lastEvent.message);
 

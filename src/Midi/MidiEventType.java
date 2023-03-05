@@ -6,15 +6,26 @@ package Midi;
 public enum MidiEventType {
     MIDI(0x80),
     META(0xFF),
-
-    // Marker, Cue Point, Tempo, SMPTE Offset, Time Signature, and Key Signature
-    META_TIMING_RELATED(0xFF0),
     SYSEX(0xF0),
-    SET_TEMPO(0x51);
+    UNKNOWN(-1);
+
+    // META_TIMING_RELATED(0xFF0), Marker, Cue Point, Tempo, SMPTE Offset, Time Signature, and Key Signature
 
     final int id;
 
     MidiEventType(int id) {
         this.id = id;
+    }
+
+    /**
+     * @param status The upper status byte
+     * @return The identifying tag
+     */
+    public static MidiEventType fromStatusByte(short status) {
+        return switch (status) {
+            case 0xFF -> META;
+            case 0xF0, 0xF7 -> SYSEX;
+            default -> MIDI;
+        };
     }
 }

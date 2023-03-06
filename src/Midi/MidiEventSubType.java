@@ -40,8 +40,10 @@ public enum MidiEventSubType {
         idByte = id;
     }
 
-    private static final List<MidiEventSubType> twoByteChannelTypes = List.of(PROGRAM_CHANGE, CHANNEL_PRESSURE);
-    private static final List<MidiEventSubType> timingRelatedTypes = List.of(MARKER, CUEPOINT, SET_TEMPO, SMPTE_OFFSET, TIME_SIGNATURE, KEY_SIGNATURE);
+    private static final List<MidiEventSubType> CHANNEL_TYPES = List.of(
+            PROGRAM_CHANGE, CHANNEL_PRESSURE, CONTROLLER, PITCH_BEND, NOTE_ON, NOTE_OFF, POLYPHONIC_PRESSURE
+    );
+    private static final List<MidiEventSubType> TIMING_RELATED_TYPES = List.of(MARKER, CUEPOINT, SET_TEMPO, SMPTE_OFFSET, TIME_SIGNATURE, KEY_SIGNATURE);
 
     /**
      * Only Meta-events have a type byte
@@ -73,8 +75,8 @@ public enum MidiEventSubType {
 
     public static MidiEventSubType fromStatusNibble(byte status) {
         return switch (status) {
-            case 0x8 -> NOTE_ON;
-            case 0x9 -> NOTE_OFF;
+            case 0x8 -> NOTE_OFF;
+            case 0x9 -> NOTE_ON;
             case 0xA -> POLYPHONIC_PRESSURE;
             case 0xB -> CONTROLLER;
             case 0xC -> PROGRAM_CHANGE;
@@ -84,12 +86,12 @@ public enum MidiEventSubType {
         };
     }
 
-    public boolean isTwoByteChannelType() {
-        return twoByteChannelTypes.stream().anyMatch(st -> this == st);
+    public boolean isChannelType() {
+        return CHANNEL_TYPES.stream().anyMatch(st -> this == st);
     }
 
     /** META_TIMING_RELATED(0xFF0), Marker, Cue Point, Tempo, SMPTE Offset, Time Signature, and Key Signature */
     public boolean isTimingRelated() {
-        return timingRelatedTypes.stream().anyMatch(st -> this == st);
+        return TIMING_RELATED_TYPES.stream().anyMatch(st -> this == st);
     }
 }

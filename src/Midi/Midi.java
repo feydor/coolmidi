@@ -237,7 +237,7 @@ public class Midi {
                     subType = MidiEventSubType.fromStatusNibble(messageType);
                     messageLen += switch(messageType) {
                         // 3-byte messages
-                        case 0x8, 0x9, 0xA, 0xB, 0xE: {
+                        case 0x8, 0x9, 0xA, 0xB, 0xE : {
                             // TODO: Why is runningStatus always false (has to do withn signed integers in Java, probably)
                             // Does this mean that files that use running status will fuck up?
                             int nbyte = runningStatus ? 1 : 2;
@@ -252,9 +252,13 @@ public class Midi {
                         }
                         default: {
                             String msg = String.format("Unexpected MIDI message!\n" +
-                                            "trackNum=%d, Status=%02X, messageType=%02X, bytesRead=%d, messageLen=%d",
-                                    trackNum, status, messageType, bytesRead, messageLen);
-                            throw new IllegalStateException(msg);
+                                            "trackNum=%d, Status=%02X, messageType=%02X, subType=%s, bytesRead=%d, messageLen=%d",
+                                    trackNum, status, messageType, subType, bytesRead, messageLen);
+                            System.out.println(msg);
+                            // throw new IllegalStateException(msg);
+                            // i guess we are assuming its length is 3 bytes
+                            file.skipNBytes(1);
+                            yield 1;
                         }
                     };
                 }
@@ -433,7 +437,7 @@ public class Midi {
 
         record MetaEventParseResult(int type, byte[] data, int len) {}
         record NormalMidiEventParseResult(int status, int data1, int data2) {}
-        record ChannelMidiEventParseResult(int cmd, int channel, int data1) {}
+        record ChannelMidiEventParseResult(int cmd, int channel, int data1, int data2) {}
 
         class Event {
             /** One of the three main types of Events: MIDI, Meta, or Sysex */
@@ -492,8 +496,8 @@ public class Midi {
                 if (type != MidiEventType.MIDI) {
                     throw new IllegalStateException("Attempting to parse a NON Midi event as a Midi event! " + message);
                 }
-                if (subType.isTwoByteChannelType()) {
-                    throw new IllegalArgumentException("Attempting to parse a 2-bute channel Midi event as a 3-byte normal Midi event: " + message);
+                if (subType.isChannelType()) {
+                    throw new IllegalArgumentException("Attempting to parse a channel Midi event as a 3-byte normal Midi event: " + message);
                 }
 
                 int status = Integer.parseUnsignedInt(message.substring(0, 2), 16);
@@ -506,14 +510,16 @@ public class Midi {
                 if (type != MidiEventType.MIDI) {
                     throw new IllegalStateException("Attempting to parse a NON Midi event as a Midi event! " + type);
                 }
-                if (!subType.isTwoByteChannelType() || nbytes() != 2) {
+                if (!subType.isChannelType()) {
                     throw new RuntimeException("Channel Midi Event is fucked: " + message);
                 }
 
                 int cmd = Integer.parseUnsignedInt(message.substring(0, 2), 16);
                 int channel = (cmd & 0xF);
                 int data1 = Integer.parseUnsignedInt(message.substring(2, 4), 16);
-                return new ChannelMidiEventParseResult(cmd, channel, data1);
+                int data2 = message.length() == 6 ? Integer.parseUnsignedInt(message.substring(4), 16)
+                                                  : -1;
+                return new ChannelMidiEventParseResult(cmd, channel, data1, data2);
             }
         }
     }

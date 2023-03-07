@@ -2,7 +2,10 @@ package Midi;
 
 import javax.sound.midi.*;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -13,7 +16,10 @@ public class MidiPlayer {
 
     private final Receiver receiver;
 
-    public MidiPlayer(String[] filenames) throws MidiUnavailableException {
+    private final int TERM_WIDTH = 100;
+    private final static String[] NOTES = new String[]{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+
+    public MidiPlayer(String[] filenames) throws MidiUnavailableException, IOException {
         midiFiles = Arrays.stream(filenames).map(filename -> {
             try {
                 return new Midi(filename);
@@ -42,28 +48,91 @@ public class MidiPlayer {
         System.out.println("Playing the following files: " + filenames);
 
         for (var midi : midiFiles) {
-            var futures = play(midi);
+            int[] channels = new int[midi.tracks.size()];
+            var futures = play(midi, channels);
 
             long startTime = System.currentTimeMillis() / 1000;
-            Timer timer = new Timer();
-            timer.scheduleAtFixedRate(new TimerTask() {
-                @Override
-                public void run() {
-                    long dt = (System.currentTimeMillis() / 1000) - startTime;
-                    System.out.print(dt + " ");
-                }
-            }, 0, 1000);
+            final int[] filenamePos = {0};
+//            Timer timer = new Timer();
+//            timer.scheduleAtFixedRate(new TimerTask() {
+//                @Override
+//                public void run() {
+//                    long dt = (System.currentTimeMillis() / 1000) - startTime;
+//                    System.out.print(dt + " ");
+//                    System.out.print("\033[H\033[2J");
+//                    System.out.flush();
+//                    System.out.println(" ".repeat(filenamePos[0]) + midi.filename);
+//                    int maxWidth = 125;
+//                    filenamePos[0] = Math.min(filenamePos[0] +1, maxWidth-midi.filename.length());
+//                    if (filenamePos[0] == maxWidth-midi.filename.length()) filenamePos[0] = 0;
+//                    for (int i = 0; i < channels.length; ++i) {
+//                        System.out.println(i+1 + " " + "#".repeat(Math.max(channels[i] - 36, 0)));
+//                    }
+//                }
+//            }, 0, 250);
 
 
             for (var future : futures) {
-                future.get();
+//                future.get();
+                long ms = 0;
+                System.out.print("\033[H\033[2J");
+                System.out.flush();
+                while (future.state() == Future.State.RUNNING) {
+                    System.out.print("\033[" + 1 + ";" + 1 + "H");
+                    System.out.println("CoolMidi v0.1.0");
+                    System.out.println("-".repeat(TERM_WIDTH));
+
+                    System.out.print("\033[" + 3 + ";" + 1 + "H");
+                    System.out.print(" ".repeat(TERM_WIDTH));
+                    System.out.print("\r");
+                    int start = filenamePos[0];
+                    int end = start + midi.filename.length();
+                    int diff = TERM_WIDTH - end;
+                    String overflowChars;
+                    int pivot = 0;
+                    if (diff <= -1*midi.filename.length()) {
+                        filenamePos[0] = 0;
+                        start = 0;
+                        System.out.print(" ".repeat(start) + midi.filename);
+                    } else if (diff < 0) {
+                        // print overflow characters from filename (starting at the end)
+                        pivot = Math.abs(diff);
+                        overflowChars = midi.filename.substring(midi.filename.length()-1-pivot);
+                        System.out.print(overflowChars);
+                        System.out.print(" ".repeat(TERM_WIDTH - overflowChars.length() - (midi.filename.length()-overflowChars.length())));
+                        System.out.print(midi.filename.substring(0, midi.filename.length()-pivot-1));
+                    } else {
+                        System.out.print(" ".repeat(start) + midi.filename);
+                    }
+
+                    filenamePos[0] = Math.min(filenamePos[0]+1, TERM_WIDTH+midi.filename.length());
+
+                    System.out.print("\033[" + 4 + ";" + 1 + "H");
+                    for (int i = 0; i < channels.length; ++i) {
+                        System.out.print("\r");
+                        System.out.print(" ".repeat(TERM_WIDTH));
+                        System.out.print("\r");
+                        int magnitude = Math.min(Math.max(channels[i] - 20, 0), TERM_WIDTH-30);
+                        String ansiColor = "\u001B[3" + ((magnitude % 7) + 1) + "m"; // Red -> Cyan
+                        int spaces = ((i+1) / 10) > 0 ? 0 : 1; // for padding digits
+                        System.out.println(" ".repeat(spaces) + (i + 1) + " " + ansiColor + "█".repeat(magnitude) + " " + hexNote(channels[i]) + "\u001B[0m");
+                    }
+                    System.out.print(ms++);
+                    Thread.sleep(100);
+                }
             }
 
             System.out.println("Finished playing: " + midi.filename);
-            timer.cancel();
+//            timer.cancel();
         }
 
         System.out.println("END");
+    }
+
+    private String hexNote(int note) {
+        if (note == 0) return "";
+        int index = note % NOTES.length;
+        return NOTES[index];
     }
 
     /**
@@ -71,38 +140,48 @@ public class MidiPlayer {
      * @param midi The parsed MIDI file to play
      * @return A future letting the caller know when playback is ended
      */
-    private List<Future<Void>> play(Midi midi) throws Exception {
+    private List<Future<Void>> play(Midi midi, int[] channels) throws Exception {
 
-        // Assuming format#1 MIDI:
-        // 1. Send the track#1 as it contains timing events
-        // 2. Send events from track#2+ simultaneously
-        int globalTempo = 80000; // in microseconds per quarter-note
-        for (var event : midi.tracks.get(0).events) {
-            MetaMessage msg = new MetaMessage();
+        int globalTempo = 0x07A120; // 120 bpm in microseconds per quarter-note
+        if (midi.header.format == MidiFileFormat.FORMAT_1) {
+            // Assuming format#1 MIDI:
+            // 1. Send the track#1 as it contains timing events
+            // 2. Send events from track#2+ simultaneously
+            System.out.println("FORMAT 1 MIDI, sending the first track's global tempo info...");
+            for (var event : midi.tracks.get(0).events) {
+                MetaMessage msg = new MetaMessage();
 
-            var parsed = event.parseAsMetaEvent();
-            msg.setMessage(parsed.type(), parsed.data(), parsed.len());
+                if (event.type != MidiEventType.META) {
+                    continue;
+                }
 
-            System.out.printf("%s: %s: %s\n", event.type, event.subType, event.message);
+                var parsed = event.parseAsMetaEvent();
+                msg.setMessage(parsed.type(), parsed.data(), parsed.len());
 
-            // Update the global tempo
-            if (event.subType == MidiEventSubType.SET_TEMPO) {
-                String tempoData = ByteFns.toHex(parsed.data());
-                globalTempo = Integer.parseUnsignedInt(tempoData, 16) / 3; // TODO: Why is this divided by 5?
-                System.out.println("TEMPO change for track#" + 1 + ": " + globalTempo);
+                System.out.printf("%s: %s: %s\n", event.type, event.subType, event.message);
+
+                // Update the global tempo
+                if (event.subType == MidiEventSubType.SET_TEMPO) {
+                    String tempoData = ByteFns.toHex(parsed.data());
+                    globalTempo = Integer.parseUnsignedInt(tempoData, 16) / 3; // /3 TODO: Why is this divided by 5?
+
+                    System.out.println("TEMPO change for track#" + 1 + ": " + globalTempo);
+                }
+
+                sleep(200);
+                receiver.send(msg, -1);
             }
-
-            sleep(200);
-            receiver.send(msg, -1);
         }
 
-        int nthreads = midi.tracks.size()-1;
+        int startingTrack = midi.header.format == MidiFileFormat.FORMAT_1 ? 1 : 0;
+        int nthreads = midi.header.format == MidiFileFormat.FORMAT_1 ? midi.tracks.size()-1
+                                                                     : midi.tracks.size();
         var threadPool = Executors.newFixedThreadPool(nthreads);
         var futures = new ArrayList<Future<Void>>();
 
-        for (int i = 1; i < midi.tracks.size(); ++i) {
+        for (int i = startingTrack; i < midi.tracks.size(); ++i) {
             var track = midi.tracks.get(i);
-            var trackThread = new SingleTrackPlayback(midi, track, receiver, i+1, globalTempo);
+            var trackThread = new SingleTrackPlayback(midi, track, receiver, i, globalTempo, channels);
             futures.add(threadPool.submit(trackThread));
         }
 
@@ -117,18 +196,24 @@ public class MidiPlayer {
         int trackNum;
         int tempo; // in microseconds per quarter-note
         Receiver receiver;
+        int channels[];
 
-        public SingleTrackPlayback(Midi midi, Midi.MidiChunk.Track track, Receiver receiver, int trackNum, int initialTempo) {
+        public SingleTrackPlayback(Midi midi, Midi.MidiChunk.Track track,
+                                   Receiver receiver, int trackNum, int initialTempo, int[] channels) {
             this.midi = midi;
             this.track = track;
             this.trackNum = trackNum;
             this.receiver = receiver;
             this.tempo = initialTempo;
+            this.channels = channels;
         }
 
         @Override
-        public Void call() {
+        public Void call() throws InvalidMidiDataException {
             for (var event : track.events) {
+//                System.out.printf("In track#%d: %s: %s: %s: dt:%02X\n",
+//                        trackNum, event.type, event.subType, event.message, event.ticks);
+
                 int duration = midi.eventDurationInMs(event, tempo);
                 if (event.type == MidiEventType.MIDI) {
                     ShortMessage msg = new ShortMessage();
@@ -140,22 +225,15 @@ public class MidiPlayer {
 
                     if (event.subType.isChannelType()) {
                         var parsed = event.parseAsChannelMidiEvent();
-
-                        if (event.subType == MidiEventSubType.PROGRAM_CHANGE) {
-                            System.out.printf("Track #%d: %s: %s\n", trackNum, event.message, parsed);
+                        if (event.subType == MidiEventSubType.NOTE_ON || event.subType == MidiEventSubType.PITCH_BEND) {
+                            channels[parsed.channel()] = parsed.data1();
+                        } else if (event.subType == MidiEventSubType.NOTE_OFF) {
+                            channels[parsed.channel()] = 0;
                         }
 
-                        try {
-                            msg.setMessage(parsed.cmd(), parsed.channel(), parsed.data1(), parsed.data2());
-                        } catch (InvalidMidiDataException e) { throw new RuntimeException(e); }
+                        msg.setMessage(parsed.cmd(), parsed.channel(), parsed.data1(), parsed.data2());
                     } else {
-                        var parsed = event.parseAsNormalMidiEvent();
-                        if (event.subType == MidiEventSubType.PROGRAM_CHANGE) {
-                            System.out.printf("IN NORMAL: %s: Track #%d: %s: %s\n", trackNum, event.subType, event.message, parsed);
-                        }
-                        try {
-                            msg.setMessage(parsed.status(), parsed.data1(), parsed.data2());
-                        } catch (InvalidMidiDataException e) { throw new RuntimeException(e); }
+                        throw new RuntimeException("A NON-Channel MIDI event was encountered!: " + event.message);
                     }
 
                     sleep(duration);
@@ -164,11 +242,7 @@ public class MidiPlayer {
                     MetaMessage msg = new MetaMessage();
 
                     var parsed = event.parseAsMetaEvent();
-                    System.out.printf("In track#%d: %s: %s: %s parsed=%s\n",
-                            1, event.type, event.subType, event.message, parsed);
-                    try {
-                        msg.setMessage(parsed.type(), parsed.data(), parsed.len());
-                    } catch (InvalidMidiDataException e) { throw new RuntimeException(e); }
+                    msg.setMessage(parsed.type(), parsed.data(), parsed.len());
 
                     // Update the global tempo
                     if (event.subType == MidiEventSubType.SET_TEMPO) {
@@ -179,6 +253,14 @@ public class MidiPlayer {
 
                     sleep(duration);
                     receiver.send(msg, duration);
+                } else if (event.type == MidiEventType.SYSEX) {
+                  SysexMessage msg = new SysexMessage();
+                  int status = event.type.id; // TODO: SYEX HERE?
+                  byte[] data = ByteFns.fromHex(event.message.substring(2));
+                  int len = data.length;
+                  msg.setMessage(status, data, len);
+                  sleep(duration);
+                  receiver.send(msg, duration);
                 } else {
                     throw new RuntimeException("WTF. SYEX encountered?");
                 }

@@ -125,22 +125,50 @@ class MidiTest {
         assertEquals("904864", secondTrack.events.get(10).message);
         assertEquals("905764", secondTrack.events.get(11).message);
         assertEquals("805450", secondTrack.events.get(12).message);
-
-        // test calculateDeltatime
-        /**
-         * public int calculateDeltatime(MidiChunk.Event event, int tempo) {
-         *         if (header.useMetricalTiming) {
-         *             double millisecondsPerTick = (((double)tempo / header.ticksPerQuarterNote()) / 1000);
-         *             double timeInMs = event.ticks * millisecondsPerTick;
-         *             System.out.printf("ticks=%d tempo=%d msPerTick=%f timeInMs=%f\n",
-         *                     event.ticks, tempo, millisecondsPerTick, timeInMs);
-         *             return (int)timeInMs;
-         *         } else {
-         *             return header.timecode().toMilliseconds();
-         *         }
-         *     }
-         */
-
-//        midi.eventDuration()
     }
+
+    @Test
+    void emptyMidi() throws IOException {
+        // Empty midi file has a header and 1 track with the End of Track event
+        Midi midi = new Midi("test/midi_test-empty.mid");
+        assertEquals(MidiIdentifier.MThd, midi.header.id);
+        assertEquals(0x00000006, midi.header.len);
+        assertEquals(MidiFileFormat.FORMAT_0, midi.header.format);
+        assertEquals(0x0001, midi.header.ntracks);
+        assertTrue(midi.header.useMetricalTiming);
+        assertEquals(0x060, midi.header.tickdiv);
+
+        assertEquals(1, midi.tracks.size());
+        assertEquals(MidiIdentifier.MTrk, midi.tracks.get(0).id);
+        assertEquals(4, midi.tracks.get(0).len);
+        assertEquals(MidiEventSubType.END_OF_TRACK, midi.tracks.get(0).events.get(0).subType);
+    }
+
+    @Test
+    void cmajorScaleMidi() throws IOException {
+        Midi midi = new Midi("test/midi_test-c-major-scale.mid");
+        assertEquals(MidiFileFormat.FORMAT_0, midi.header.format);
+        assertEquals(0x0001, midi.header.ntracks);
+        assertTrue(midi.header.useMetricalTiming);
+        assertEquals(0x060, midi.header.tickdiv);
+
+        var track = midi.tracks.get(0);
+        assertEquals(0x001c3, track.len);
+    }
+
+    @Test
+    void gmAllPercurssion() throws IOException {
+        Midi midi = new Midi("test/midi_test-all-gm-percussion.mid");
+        assertEquals(MidiFileFormat.FORMAT_0, midi.header.format);
+        assertEquals(0x0001, midi.header.ntracks);
+        assertTrue(midi.header.useMetricalTiming);
+        assertEquals(0x060, midi.header.tickdiv);
+
+        var track = midi.tracks.get(0);
+        assertEquals(0x000aff, track.len);
+
+
+    }
+
+
 }

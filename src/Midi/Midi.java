@@ -3,12 +3,7 @@ package Midi;
 import Midi.exceptions.MidiInvalidHeaderException;
 import Midi.exceptions.MidiParseException;
 
-import javax.sound.midi.InvalidMidiDataException;
-import java.io.BufferedInputStream;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -41,6 +36,7 @@ public class Midi {
      */
     public Midi(String filename) throws IOException {
         parseMidiFile(filename);
+        this.filename = filename;
     }
 
     private void parseMidiFile(String filename) throws IOException {
@@ -49,8 +45,6 @@ public class Midi {
         if (!isMidiFile) {
             throw new MidiParseException("Not a midi file!: " + filename);
         }
-        this.filename = filename;
-
 
         FileInputStream filestream;
         BufferedInputStream file;
@@ -109,8 +103,9 @@ public class Midi {
         if (header.useMetricalTiming) {
             int ticksPerQuarterNote = (header.tickdiv & 0xFF) & 0x7F;
             double millisecondsPerTick = (((double)tempo / ticksPerQuarterNote) / 1000);
+//            System.out.println("ms/tick: " + millisecondsPerTick);
             double timeInMs = event.ticks * millisecondsPerTick;
-            return (int)timeInMs;
+            return (int)Math.round(timeInMs);
         } else {
             int fps = (header.tickdiv >> 8) & 0xFF;
             if (Stream.of(24, 25, 29, 30).noneMatch(n -> n == fps)) {
@@ -140,9 +135,11 @@ public class Midi {
 
         // Now time for event parsing
         // This is where the real *fun* begins
-        // TODO: Going to be gay here and only parse Format_1 MIDI files
-        if (header.format == MidiFileFormat.FORMAT_0 || header.format == MidiFileFormat.FORMAT_2) {
-            throw new MidiParseException("You tried to play format 0 or 2 MIDI. But I'm to lazy to parse those right now so eh.");
+        // TODO: Skipping format 2 midis for now, though they should work as is
+        // NOTE: In format 2, each MTrk should begin with at least one initial tempo
+        // (and time signature) event
+        if (header.format == MidiFileFormat.FORMAT_2) {
+            throw new MidiParseException("You tried to play format 2 MIDI. But I'm to lazy to parse those right now so eh.");
         }
 
         // Format 1 specifics:
@@ -151,6 +148,8 @@ public class Midi {
 
         int bytesRead = 0;
         var events = new ArrayList<MidiChunk.Event>();
+        MidiChunk.Event prevEvent = null; // Used to check for running status
+        short prevStatus = 0;
         while (bytesRead < len) {
             // The overall strategy here is this:
             // For each event:
@@ -170,11 +169,18 @@ public class Midi {
             int messageLen = 0; // the # of bytes in the message
 
             // Look at first byte of the event (the status byte) to determine the type
-            short status = (short) (file.readNBytes(1)[0] & 0xFF); // to unsigned byte
+            short status = ByteFns.toUnsignedShort(file.readNBytes(1)); // to unsigned byte
             messageLen++;
-            MidiEventType eventType = MidiEventType.fromStatusByte(status);
-            MidiEventSubType subType = MidiEventSubType.UNKNOWN;
+            var pair = MidiEventType.fromStatusByte(status, prevEvent);
+            MidiEventType eventType = pair.first();
+            boolean useRunningStatus = pair.second();
+            if (useRunningStatus) {
+                status = prevStatus;
+            }
 
+            MidiEventSubType subType = MidiEventSubType.UNKNOWN;
+            int dataStart = 0;
+            int dataLen = 0;
             switch (eventType) {
                 case META -> {
                     // Meta-Event: <FF:1B> <type:1B> <len:Varlen><data:len B>
@@ -185,38 +191,53 @@ public class Midi {
                         // 8-byte events
                         case 0x54 -> { // SMPTE Offset FF 54 05 hr mn se fr ff
                             file.skipNBytes(6);
+                            dataStart = 3;
+                            dataLen = 5;
                             yield 6;
                         }
                         // 7-byte events
                         case 0x58 -> { // Time Signature FF 58 04 nn dd cc bb
                             file.skipNBytes(5);
+                            dataStart = 3;
+                            dataLen = 4;
                             yield 5;
                         }
                         // 6-byte events
                         case 0x51 -> { // Tempo FF 51 03 tt tt tt
                             file.skipNBytes(4);
+                            dataStart = 3;
+                            dataLen = 3;
                             yield 4;
                         }
                         // 5-byte events
-                        case 0x00, 0x59 -> { // Sequence Number, Key Signature
+                        case 0x00, 0x59 -> { // Sequence Number (FF 00 02 ss ss),
+                                             // Key Signature (FF 59 02 sf mi)
                             file.skipNBytes(3);
+                            dataStart = 3;
+                            dataLen = 2;
                             yield 3;
                         }
                         // 4-byte events
                         // MIDI Channel Prefix
-                        case 0x20, 0x21 -> { // MIDI Channel Prefix, MIDI Port
+                        case 0x20, 0x21 -> { // MIDI Channel Prefix (FF 20 01 cc), MIDI Port
                             file.skipNBytes(2);
+                            dataStart = 3;
+                            dataLen = 1;
                             yield 2;
                         }
                         // 3-byte events
                         case 0x2F -> { // End of Track FF 2F 00
                             file.skipNBytes(1);
+                            dataStart = 2;
+                            dataLen = 0;
                             yield 1;
                         }
                         // Text events, varlen
                         case 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x7F -> {
                             var length = VarLenQuant.from(file);
                             file.skipNBytes(length.value);
+                            dataStart = 1 + length.nbytes;
+                            dataLen = 1 + length.value;
                             yield length.value + length.nbytes;
                         }
                         default -> throw new MidiParseException("Unknown Meta-Event encountered! status=" + status);
@@ -228,7 +249,6 @@ public class Midi {
                     // then running status in effect which means that
                     // this byte is actually the first data byte (the status is carried over from the previous event)
                     // Only can occur if the last event was also a MIDI event.
-                    boolean runningStatus = status < 120;
 
                     // Status byte is nibblised:
                     // Top nibble is the message type
@@ -238,16 +258,20 @@ public class Midi {
                     messageLen += switch(messageType) {
                         // 3-byte messages
                         case 0x8, 0x9, 0xA, 0xB, 0xE : {
-                            // TODO: Why is runningStatus always false (has to do withn signed integers in Java, probably)
+                            // TODO: Why is runningStatus always false (has to do with signed integers in Java, probably)
                             // Does this mean that files that use running status will fuck up?
-                            int nbyte = runningStatus ? 1 : 2;
+                            int nbyte = useRunningStatus ? 1 : 2;
                             file.skipNBytes(nbyte);
+                            dataStart = 1;
+                            dataLen = 2;
                             yield nbyte;
                         }
                         // 2-byte messages
                         case 0xC, 0xD: {
-                            int nbyte = runningStatus ? 0 : 1;
+                            int nbyte = useRunningStatus ? 0 : 1;
                             file.skipNBytes(nbyte);
+                            dataStart = 1;
+                            dataLen = 1;
                             yield nbyte;
                         }
                         default: {
@@ -255,22 +279,23 @@ public class Midi {
                                             "trackNum=%d, Status=%02X, messageType=%02X, subType=%s, bytesRead=%d, messageLen=%d",
                                     trackNum, status, messageType, subType, bytesRead, messageLen);
                             System.out.println(msg);
-                            // throw new IllegalStateException(msg);
-                            // i guess we are assuming its length is 3 bytes
-                            file.skipNBytes(1);
-                            yield 1;
+                            throw new IllegalStateException(msg);
                         }
                     };
                 }
-                case SYSEX ->
+                case SYSEX -> {
                     // SysEx event:
                     // Complete message: <F0> <len:VarLen> <message:len B>
                     // TODO: I think I can just treat these like the varlen text events, same with 0xF7
-                        throw new MidiParseException("SysEx events (0xF0 and 0xF7) are not implemented yet!");
+                    var length = VarLenQuant.from(file);
+                    file.skipNBytes(length.value);
+                    messageLen += length.value + length.nbytes;
+                    // throw new MidiParseException("SysEx events (0xF0 and 0xF7) are not implemented yet!");
+                }
                 case UNKNOWN -> {
                     String msg = String.format("Unexpected MIDI message!\n" +
-                                    "trackNum=%d, Status=%02X, bytesRead=%d, messageLen=%d",
-                            trackNum, status, bytesRead, messageLen);
+                                    "trackNum=%d, Status=%02X, bytesRead=%d, messageLen=%d, prevEvent=%s",
+                            trackNum, status, bytesRead, messageLen, prevEvent);
                     throw new IllegalStateException(msg);
                 }
             }
@@ -286,12 +311,22 @@ public class Midi {
             String message = ByteFns.toHex(file.readNBytes(messageLen));
             bytesRead += messageLen;
 
+            // Just absolutely fuck it, add the previous status to the runningStatus message
+            // Yes, this negates the entire performance reason for having running status but it
+            // makes my life so easier so eh
+            if (useRunningStatus) {
+                message = ByteFns.toHex(new byte[]{(byte) prevStatus}) + message;
+            }
+
             // TODO: Remove, this is for debugging
             if (subType == MidiEventSubType.SET_TEMPO) {
                 System.out.println("Tempo msg: " + message);
             }
 
-            events.add(new MidiChunk.Event(eventType, subType, dt.value, message));
+            var event = new MidiChunk.Event(eventType, subType, dt.value, message, useRunningStatus, dataStart, dataLen);
+            prevEvent = event;
+            prevStatus = status;
+            events.add(event);
         }
 
         // Last event in each chunk MUST be End of Track
@@ -436,7 +471,7 @@ public class Midi {
         }
 
         record MetaEventParseResult(int type, byte[] data, int len) {}
-        record NormalMidiEventParseResult(int status, int data1, int data2) {}
+
         record ChannelMidiEventParseResult(int cmd, int channel, int data1, int data2) {}
 
         class Event {
@@ -452,17 +487,27 @@ public class Midi {
             /** The event's bytes */
             public String message;
 
+            /** If set, the message's status byte is the same the previous message and the receiver should assume it was the same as the last one. */
+            public boolean useRunningStatus;
+
+            private final int dataStart;
+            private final int dataLen;
+
             /**
              * A MidiEvent consists of:
              * @param type The type of event (MIDI, SYSEX, or META)
              * @param ticks a variable length quantity (1 - 4 bytes) denoting the time since the last event
              * @param message 2 or more bytes describing the event itself
              */
-            public Event(MidiEventType type, MidiEventSubType subType, int ticks, String message) {
+            public Event(MidiEventType type, MidiEventSubType subType, int ticks,
+                         String message, boolean useRunningStatus, int dataStart, int dataLen) {
                 this.type = type;
                 this.subType = subType;
                 this.ticks = ticks;
                 this.message = message;
+                this.useRunningStatus = useRunningStatus;
+                this.dataStart = dataStart;
+                this.dataLen = dataLen;
             }
 
             /** Returns the number of bytes represented in the message */
@@ -476,34 +521,25 @@ public class Midi {
              */
             public MetaEventParseResult parseAsMetaEvent() {
                 if (type != MidiEventType.META) {
-                    throw new IllegalStateException("Attempting to parse a NON Meta event as a Meta event! " + type);
+                    throw new IllegalStateException("Attempting to parse a NON Meta event as a Meta event! event=" + this);
                 }
+                byte[] msgBytes = ByteFns.fromHex(message);
 
-                byte[] data = ByteFns.fromHex(message.substring(2));
 
-                if (subType == MidiEventSubType.SET_TEMPO) {
-                    // The data is three bytes from the upper byte
-                    data = ByteFns.fromHex(message.substring(6));
-                    if (data.length != 3) {
-                        throw new RuntimeException("WTF should be three bytes: " + Arrays.toString(data));
-                    }
+                byte[] data = Arrays.copyOfRange(msgBytes, dataStart, msgBytes.length);
+
+//                if (subType == MidiEventSubType.SET_TEMPO) {
+//                    // The data is three bytes from the upper byte
+//                    data = ByteFns.fromHex(message.substring(6));
+//                    if (data.length != 3) {
+//                        throw new RuntimeException("WTF should be three bytes: " + Arrays.toString(data));
+//                    }
+//                }
+                if (data.length != dataLen && subType != MidiEventSubType.END_OF_TRACK) {
+                    throw new MidiParseException("data.length !+ dataLen: " + Arrays.toString(data) + " " + dataLen);
                 }
 
                 return new MetaEventParseResult(subType.idByte, data, data.length);
-            }
-
-            public NormalMidiEventParseResult parseAsNormalMidiEvent() {
-                if (type != MidiEventType.MIDI) {
-                    throw new IllegalStateException("Attempting to parse a NON Midi event as a Midi event! " + message);
-                }
-                if (subType.isChannelType()) {
-                    throw new IllegalArgumentException("Attempting to parse a channel Midi event as a 3-byte normal Midi event: " + message);
-                }
-
-                int status = Integer.parseUnsignedInt(message.substring(0, 2), 16);
-                int data1 = Integer.parseUnsignedInt(message.substring(2, 4), 16);
-                int data2 = Integer.parseUnsignedInt(message.substring(4, 6), 16);
-                return new NormalMidiEventParseResult(status, data1, data2);
             }
 
             public ChannelMidiEventParseResult parseAsChannelMidiEvent() {
@@ -518,8 +554,18 @@ public class Midi {
                 int channel = (cmd & 0xF);
                 int data1 = Integer.parseUnsignedInt(message.substring(2, 4), 16);
                 int data2 = message.length() == 6 ? Integer.parseUnsignedInt(message.substring(4), 16)
-                                                  : -1;
+                                                  : 0xDEADBEEF;
                 return new ChannelMidiEventParseResult(cmd, channel, data1, data2);
+            }
+
+            @Override
+            public String toString() {
+                return "Event{" +
+                        "type=" + type +
+                        ", subType=" + subType +
+                        ", ticks=" + ticks +
+                        ", message='" + message + '\'' +
+                        '}';
             }
         }
     }

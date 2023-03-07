@@ -1,8 +1,5 @@
 import Midi.MidiPlayer;
-import Midi.Midi;
-import Midi.MidiEventType;
 
-import javax.sound.midi.*;
 import java.util.Arrays;
 
 public class Main {

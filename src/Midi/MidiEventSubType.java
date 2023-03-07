@@ -32,7 +32,9 @@ public enum MidiEventSubType {
     TIME_SIGNATURE(0x58),
     KEY_SIGNATURE(0x59),
 
-    UNKNOWN(-1);
+    /* Universal SysEx events (manufacturer id == second byte) */
+
+    UNKNOWN(0xDEADBEEF);
 
     final int idByte;
 

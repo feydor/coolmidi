@@ -613,4 +613,3 @@ enum MidiIdentifier {
         this.id = id;
     }
 }
-

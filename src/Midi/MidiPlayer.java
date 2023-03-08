@@ -2,24 +2,20 @@ package Midi;
 
 import javax.sound.midi.*;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 public class MidiPlayer {
     private final List<Midi> midiFiles;
-    private static final int DEVICE_NUM = 3;
 
     private final Receiver receiver;
 
     private final int TERM_WIDTH = 100;
     private final static String[] NOTES = new String[]{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 
-    public MidiPlayer(String[] filenames) throws MidiUnavailableException, IOException {
+    public MidiPlayer(String[] filenames) throws MidiUnavailableException {
         midiFiles = Arrays.stream(filenames).map(filename -> {
             try {
                 return new Midi(filename);
@@ -33,10 +29,6 @@ public class MidiPlayer {
         var devices = MidiSystem.getMidiDeviceInfo();
         System.out.println("# of devices: " + devices.length);
         System.out.println("Available devices: " + Arrays.toString(devices));
-//        System.out.println("Choosing device#" + DEVICE_NUM + ": " + devices[DEVICE_NUM]);
-//
-//        MidiDevice device = MidiSystem.getMidiDevice(devices[DEVICE_NUM]);
-//        device.open();
         receiver = MidiSystem.getReceiver();
     }
 
@@ -48,10 +40,17 @@ public class MidiPlayer {
         System.out.println("Playing the following files: " + filenames);
 
         for (var midi : midiFiles) {
-            int[] channels = new int[midi.tracks.size()];
+
+            var channels = new HashMap<Integer, Integer>();
+            for (int i = 0; i < midi.channelUsed.length; ++i) {
+                if (midi.channelUsed[i]) {
+                    channels.put(i, 0);
+                }
+            }
+            System.out.println("# of channels used: " + channels.size());
+
             var futures = play(midi, channels);
 
-            long startTime = System.currentTimeMillis() / 1000;
             final int[] filenamePos = {0};
             for (var future : futures) {
                 long ms = 0;
@@ -60,8 +59,7 @@ public class MidiPlayer {
 
                 while (future.state() == Future.State.RUNNING) {
                     System.out.print("\033[" + 1 + ";" + 1 + "H");
-//                    System.out.println("CoolMidi v0.1.0");
-//                    System.out.println("-".repeat(TERM_WIDTH));
+                    System.out.println("CoolMidi v0.1.0 " + "/".repeat(TERM_WIDTH-16));
 
                     System.out.print("\033[" + 3 + ";" + 1 + "H");
                     System.out.print(" ".repeat(TERM_WIDTH));
@@ -70,7 +68,7 @@ public class MidiPlayer {
                     int end = start + midi.filename.length();
                     int diff = TERM_WIDTH - end;
                     String overflowChars;
-                    int pivot = 0;
+                    int pivot;
                     if (diff <= -1*midi.filename.length()) {
                         filenamePos[0] = 0;
                         start = 0;
@@ -89,14 +87,16 @@ public class MidiPlayer {
                     filenamePos[0] = Math.min(filenamePos[0]+1, TERM_WIDTH+midi.filename.length());
 
                     System.out.print("\033[" + 4 + ";" + 1 + "H");
-                    for (int i = 0; i < channels.length; ++i) {
+                    for (var entry : channels.entrySet()) {
+                        int ch = entry.getKey();
+                        int val = entry.getValue();
                         System.out.print("\r");
                         System.out.print(" ".repeat(TERM_WIDTH));
                         System.out.print("\r");
-                        int magnitude = Math.min(Math.max(channels[i] - 20, 0), TERM_WIDTH-30);
+                        int magnitude = Math.min(Math.max(val - 20, 0), TERM_WIDTH-30);
                         String ansiColor = "\u001B[3" + ((magnitude % 7) + 1) + "m"; // Red -> Cyan
-                        int spaces = ((i+1) / 10) > 0 ? 0 : 1; // for padding digits
-                        System.out.println(" ".repeat(spaces) + (i + 1) + " " + ansiColor + "#".repeat(magnitude) + " " + hexNote(channels[i]) + "\u001B[0m");
+                        int spaces = ((ch+1) / 10) > 0 ? 0 : 1; // for padding digits
+                        System.out.println(" ".repeat(spaces) + (ch + 1) + " " + ansiColor + "#".repeat(magnitude) + " " + hexNote(channels.get(ch)) + "\u001B[0m");
                     }
                     System.out.print(ms++);
                     Thread.sleep(100);
@@ -121,7 +121,7 @@ public class MidiPlayer {
      * @param midi The parsed MIDI file to play
      * @return A future letting the caller know when playback is ended
      */
-    private List<Future<Void>> play(Midi midi, int[] channels) throws Exception {
+    private List<Future<Void>> play(Midi midi, HashMap<Integer, Integer> channels) throws Exception {
 
         int globalTempo = 0x07A120; // 120 bpm in microseconds per quarter-note
         if (midi.header.format == MidiFileFormat.FORMAT_1) {
@@ -184,10 +184,10 @@ public class MidiPlayer {
         int trackNum;
         int tempo; // in microseconds per quarter-note
         Receiver receiver;
-        int channels[];
+        HashMap<Integer, Integer> channels;
 
         public SingleTrackPlayback(Midi midi, Midi.MidiChunk.Track track,
-                                   Receiver receiver, int trackNum, int initialTempo, int[] channels) {
+                                   Receiver receiver, int trackNum, int initialTempo, HashMap<Integer, Integer> channels) {
             this.midi = midi;
             this.track = track;
             this.trackNum = trackNum;
@@ -199,8 +199,8 @@ public class MidiPlayer {
         @Override
         public Void call() throws InvalidMidiDataException {
             for (var event : track.events) {
-                System.out.printf("In track#%d: %s: %s: %s: dt:%02X\n",
-                        trackNum, event.type, event.subType, event.message, event.ticks);
+//                System.out.printf("In track#%d: %s: %s: %s: dt:%02X\n",
+//                        trackNum, event.type, event.subType, event.message, event.ticks);
 
                 int duration = midi.eventDurationInMs(event, tempo);
                 if (event.type == MidiEventType.MIDI) {
@@ -213,17 +213,11 @@ public class MidiPlayer {
 
                     if (event.subType.isChannelType()) {
                         var parsed = event.parseAsChannelMidiEvent();
-                        if (event.subType == MidiEventSubType.NOTE_ON || event.subType == MidiEventSubType.PITCH_BEND) {
-                            if (parsed.channel() < channels.length) {
-                                // TODO: There can be more channels than tracks, find out how many there are
-                                channels[parsed.channel()] = parsed.data1();
-                            }
-
-
+                        if (event.subType == MidiEventSubType.NOTE_ON || event.subType == MidiEventSubType.PITCH_BEND ||
+                                 event.subType == MidiEventSubType.POLYPHONIC_PRESSURE) {
+                            channels.put(parsed.channel(), parsed.data1());
                         } else if (event.subType == MidiEventSubType.NOTE_OFF) {
-                            if (parsed.channel() < channels.length) {
-                                channels[parsed.channel()] = 0;
-                            }
+                            channels.put(parsed.channel(), 0);
                         }
 
                         msg.setMessage(parsed.cmd(), parsed.channel(), parsed.data1(), parsed.data2());

@@ -27,6 +27,7 @@ public class Midi {
     public String filename;
     public MidiChunk.Header header;
     public List<MidiChunk.Track> tracks = new ArrayList<>();
+    public boolean[] channelUsed = new boolean[16];
     private static final String END_OF_TRACK = "FF2f00";
 
     /**
@@ -71,7 +72,8 @@ public class Midi {
             // <Track> = <header <id:4B> <chunklen:4B>> <events:1+ (see parseMidiTrack)>
             byte[] id = file.readNBytes(4);
             int len = ByteFns.toUnsignedInt(file.readNBytes(4));
-            var parsedTrack = parseMidiTrack(file, id, len, i);
+
+            var parsedTrack = parseMidiTrack(file, id, len, i, channelUsed);
 
             // The bytes read must equal the track len
             if (parsedTrack.len != len) {
@@ -127,7 +129,7 @@ public class Midi {
      * @param len the # of bytes in the Track Chunk, parsed from the header
      * @return the parsed track and the # of bytes read
      */
-    private MidiTrackParseResult parseMidiTrack(BufferedInputStream file, byte[] id, int len, int trackNum) throws IOException {
+    private MidiTrackParseResult parseMidiTrack(BufferedInputStream file, byte[] id, int len, int trackNum, boolean[] channelUsed) throws IOException {
         boolean isTrackChunk = Arrays.equals(id, MidiIdentifier.MTrk.id);
         if (!isTrackChunk) {
             throw new MidiParseException("FUCKED UP parsing a track header! id=" + Arrays.toString(id));
@@ -254,12 +256,17 @@ public class Midi {
                     // Top nibble is the message type
                     // Lower nibble is the MIDI channel
                     byte messageType = (byte)((status >> 4) & 0xF);
+                    byte channel = (byte)(status & 0xF);
+
                     subType = MidiEventSubType.fromStatusNibble(messageType);
                     messageLen += switch(messageType) {
                         // 3-byte messages
                         case 0x8, 0x9, 0xA, 0xB, 0xE : {
-                            // TODO: Why is runningStatus always false (has to do with signed integers in Java, probably)
-                            // Does this mean that files that use running status will fuck up?
+                            if (messageType != 0xB) {
+                                // All messages except Controller
+                                channelUsed[channel] = true;
+                            }
+
                             int nbyte = useRunningStatus ? 1 : 2;
                             file.skipNBytes(nbyte);
                             dataStart = 1;

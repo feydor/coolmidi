@@ -33,11 +33,11 @@ public class MidiPlayer {
         var devices = MidiSystem.getMidiDeviceInfo();
         System.out.println("# of devices: " + devices.length);
         System.out.println("Available devices: " + Arrays.toString(devices));
-        System.out.println("Choosing device#" + DEVICE_NUM + ": " + devices[DEVICE_NUM]);
-
-        MidiDevice device = MidiSystem.getMidiDevice(devices[DEVICE_NUM]);
-        device.open();
-        receiver = device.getReceiver();
+//        System.out.println("Choosing device#" + DEVICE_NUM + ": " + devices[DEVICE_NUM]);
+//
+//        MidiDevice device = MidiSystem.getMidiDevice(devices[DEVICE_NUM]);
+//        device.open();
+        receiver = MidiSystem.getReceiver();
     }
 
     /**
@@ -130,6 +130,17 @@ public class MidiPlayer {
             // 2. Send events from track#2+ simultaneously
             System.out.println("FORMAT 1 MIDI, sending the first track's global tempo info...");
             for (var event : midi.tracks.get(0).events) {
+                if (event.type == MidiEventType.SYSEX) {
+                    SysexMessage msg = new SysexMessage();
+                    int status = event.type.id;
+                    byte[] data = ByteFns.fromHex(event.message.substring(2));
+                    int len = data.length;
+                    msg.setMessage(status, data, len);
+                    sleep(50);
+                    receiver.send(msg, -1);
+                    continue;
+                }
+
                 MetaMessage msg = new MetaMessage();
 
                 var parsed = event.parseAsMetaEvent();
@@ -140,12 +151,12 @@ public class MidiPlayer {
                 // Update the global tempo
                 if (event.subType == MidiEventSubType.SET_TEMPO) {
                     String tempoData = ByteFns.toHex(parsed.data());
-                    globalTempo = Integer.parseUnsignedInt(tempoData, 16) / 2; // /3 TODO: Why is this divided by 5?
+                    globalTempo = Integer.parseUnsignedInt(tempoData, 16) / 2; // 3
 
                     System.out.println("TEMPO change for track#" + 1 + ": " + globalTempo);
                 }
 
-                sleep(200);
+                sleep(50);
                 receiver.send(msg, -1);
             }
         }

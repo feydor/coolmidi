@@ -2,8 +2,19 @@
 
 ## Build
 ```
-# To native executable
-cd out/production/cool-midi-proto && native-image Main
+# Jar
+jar cfmv coolmidi.jar META-INF/MANIFEST.MF Main.class Midi
+
+# To native executable (in x64 Native Tools CMD Prompt for VS)
+set JAVA_HOME="/path/to/GRAALVM/"
+
+cd out/production/cool-midi-proto
+
+# running agentlib to detect dynamic features
+java -agentlib:native-image-agent=config-merge-dir=./config Main <TEST_MIDI>
+
+# build the executable
+native-image -H:JNIConfigurationFiles=config/jni-config.json Main
 ```
 
 ## What works (and doesn't)

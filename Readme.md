@@ -1,9 +1,11 @@
 # COOLMidi prototype
+Java 17+
 
 ## Build
 ```
 # Jar
 jar cfmv coolmidi.jar META-INF/MANIFEST.MF Main.class Midi
+java -jar coolmidi.jar <TEST_MIDI>
 
 # To native executable (in x64 Native Tools CMD Prompt for VS)
 set JAVA_HOME="/path/to/GRAALVM/"

@@ -3,12 +3,12 @@ package Midi;
 import Midi.exceptions.MidiInvalidHeaderException;
 import Midi.exceptions.MidiParseException;
 
-import java.io.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Stream;
+import java.io.BufferedInputStream;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * This class represents a parsed MIDI file.
@@ -84,6 +84,22 @@ public class Midi {
             tracks.add(parsedTrack.track);
         }
 
+        // In format 1, all tracks get their tempo from the first global tempo track
+        // In format 1, all tracks get their time signature from the first global tempo track
+        if (header.format == MidiFileFormat.FORMAT_1) {
+            int firstTrackTempo = tracks.get(0).tempo;
+            var firstTimeSig = tracks.get(0).timeSignature;
+            System.out.printf("MIDI Format 1: Aligning all track tempos with the first global tempo track (%d) ...\n", firstTrackTempo);
+            System.out.printf("MIDI Format 1: Aligning all track time signatures with the first global tempo track (%s) ...\n", firstTimeSig);
+
+            for (var track : tracks) {
+                track.tempo = firstTrackTempo;
+                track.timeSignature = firstTimeSig;
+            }
+        }
+
+        System.out.println("Printing the MIDI header: " + header);
+
         if (file.available() > 1) {
             System.out.println(Arrays.toString(file.readAllBytes()));
             throw new MidiParseException("We didn't reach the EoF and apparently there is still some bytes " +
@@ -93,30 +109,6 @@ public class Midi {
 
         System.out.println("Finished parsing " + filename);
         file.close();
-    }
-
-    /**
-     * Calculates the event's duration
-     * @param event The event to get the duration of
-     * @param tempo In microseconds per quarter note
-     * @return The event'd duration in milliseconds
-     */
-    public int eventDurationInMs(MidiChunk.Event event, int tempo) {
-        if (header.useMetricalTiming) {
-            int ticksPerQuarterNote = (header.tickdiv & 0xFF) & 0x7F;
-            double millisecondsPerTick = (((double)tempo / ticksPerQuarterNote) / 1000);
-//            System.out.println("ms/tick: " + millisecondsPerTick);
-            double timeInMs = event.ticks * millisecondsPerTick;
-            return (int)Math.round(timeInMs);
-        } else {
-            int fps = (header.tickdiv >> 8) & 0xFF;
-            if (Stream.of(24, 25, 29, 30).noneMatch(n -> n == fps)) {
-                throw new RuntimeException("FPS was not a valid SMPTE option: " + fps);
-            }
-
-            int subdivsPerFrame = (header.tickdiv & 0x00FF);
-            return (fps * subdivsPerFrame) / 1000;
-        }
     }
 
     /** The result of parseMidiTrack: the parsed track and the # of bytes read */
@@ -138,8 +130,7 @@ public class Midi {
         // Now time for event parsing
         // This is where the real *fun* begins
         // TODO: Skipping format 2 midis for now, though they should work as is
-        // NOTE: In format 2, each MTrk should begin with at least one initial tempo
-        // (and time signature) event
+        // NOTE: In format 2, each MTrk should begin with at least one initial tempob(and time signature) event
         if (header.format == MidiFileFormat.FORMAT_2) {
             throw new MidiParseException("You tried to play format 2 MIDI. But I'm to lazy to parse those right now so eh.");
         }
@@ -152,6 +143,8 @@ public class Midi {
         var events = new ArrayList<MidiChunk.Event>();
         MidiChunk.Event prevEvent = null; // Used to check for running status
         short prevStatus = 0;
+        int tempo = 0; boolean tempoSet = false;
+        MidiChunk.TimeSignature timeSignature = null; boolean timeSignatureSet = false;
         while (bytesRead < len) {
             // The overall strategy here is this:
             // For each event:
@@ -199,14 +192,36 @@ public class Midi {
                         }
                         // 7-byte events
                         case 0x58 -> { // Time Signature FF 58 04 nn dd cc bb
-                            file.skipNBytes(5);
+                            file.skipNBytes(1); // skip the 04
+                            byte[] timeSig = file.readNBytes(4);
+                            if ((timeSig[3] & 0xFF) != 0x08) {
+                                System.out.printf("WARNING: A Time Signature event (%s) is specifying a # of 32nd notes in a MIDI quarter-note (%02X) that is NOT supported by my parser, for now...\n",
+                                        "FF5804" + ByteFns.toHex(timeSig), timeSig[3] & 0xFF);
+                            }
+
+                            var newTimeSignature = new MidiChunk.TimeSignature(timeSig[0] & 0xFF, timeSig[1] & 0xFF,
+                                    timeSig[2] & 0xFF, timeSig[3] & 0xFF);
+                            if (timeSignatureSet) {
+                                System.out.printf("WARNING: The time signature for track#%d has already been set! OLD=%s NEW=%s\n", trackNum, timeSignature, newTimeSignature);
+                            }
+
+                            System.out.println("Time Signature detected: " + "FF5804" + ByteFns.toHex(timeSig) + " delta-time= " + dt.value);
+
+                            timeSignature = newTimeSignature;
+                            timeSignatureSet = true;
                             dataStart = 3;
                             dataLen = 4;
                             yield 5;
                         }
                         // 6-byte events
                         case 0x51 -> { // Tempo FF 51 03 tt tt tt
-                            file.skipNBytes(4);
+                            file.skipNBytes(1); // skip the 03
+                            int newTempo = ByteFns.toUnsignedInt(file.readNBytes(3));
+                            if (tempoSet) {
+                                System.out.printf("WARNING: The tempo for track#%d has already been set! OLD=%d NEW=%d\n", trackNum, tempo, newTempo);
+                            }
+                            tempo = newTempo;
+                            tempoSet = true;
                             dataStart = 3;
                             dataLen = 3;
                             yield 4;
@@ -231,7 +246,6 @@ public class Midi {
                         case 0x2F -> { // End of Track FF 2F 00
                             file.skipNBytes(1);
                             dataStart = 2;
-                            dataLen = 0;
                             yield 1;
                         }
                         // Text events, varlen
@@ -325,14 +339,15 @@ public class Midi {
                 message = ByteFns.toHex(new byte[]{(byte) prevStatus}) + message;
             }
 
-            // TODO: Remove, this is for debugging
-            if (subType == MidiEventSubType.SET_TEMPO) {
-                System.out.println("Tempo msg: " + message);
-            }
-
             var event = new MidiChunk.Event(eventType, subType, dt.value, message, useRunningStatus, dataStart, dataLen);
             prevEvent = event;
             prevStatus = status;
+
+            // TODO: Remove, this is for debugging
+            if (subType == MidiEventSubType.SET_TEMPO) {
+                System.out.println("Tempo message detected: " + event);
+            }
+
             events.add(event);
         }
 
@@ -354,8 +369,36 @@ public class Midi {
             }
         }
 
-        var track = new MidiChunk.Track(id, len, events);
+        var track = new MidiChunk.Track(trackNum, id, len, events, tempo, timeSignature);
         return new MidiTrackParseResult(track, bytesRead);
+    }
+
+    /**
+     * Converts every track's events relative delta-times into absolute times in milliseconds
+     * @return Every event sorted by absolute time in milliseconds
+     */
+    public List<List<MidiChunk.Event>> allEventsInAbsoluteTime() {
+        List<MidiChunk.Event> eventsSortedByAbsoluteTime = new ArrayList<>();
+        for (var track : tracks) {
+            var trackEventsSorted = track.eventsInAbsoluteTime(header.tickdiv);
+            eventsSortedByAbsoluteTime.addAll(trackEventsSorted);
+        }
+
+        var eventChunks =  eventsSortedByAbsoluteTime.stream()
+                .filter(event -> event.subType != MidiEventSubType.END_OF_TRACK)
+                .collect(Collectors.groupingBy(MidiChunk.Event::absoluteTime));
+
+        // Make sure that META events are always sent before the MIDI ones otherwise you occasionaly get strange notes in the begining
+        for (var chunk : eventChunks.entrySet()) {
+            chunk.getValue().sort(Comparator.comparingInt(e -> {
+                if (e.type == MidiEventType.META) return 0;
+                else return 1;
+            }));
+        }
+
+        return eventChunks.values().stream()
+                .sorted(Comparator.comparing(events -> events.get(0).absoluteTime))
+                .toList();
     }
 
     /**
@@ -439,26 +482,46 @@ public class Midi {
                 this.tickdiv = ByteFns.toUnsignedShort(tickdiv);
                 this.useMetricalTiming = !msbSet;
             }
+
+            @Override
+            public String toString() {
+                return "Header{" +
+                        "id=" + id +
+                        ", len=" + len +
+                        ", format=" + format +
+                        ", ntracks=" + ntracks +
+                        ", tickdiv=" + tickdiv +
+                        ", useMetricalTiming=" + useMetricalTiming +
+                        '}';
+            }
         }
+
+        record TimeSignature(int numerator, int denominator, int clocksPerClick, int notated32ndNotesPerBeat) {}
 
         /** A MidiTrack is a sequence of time-ordered events. */
         final class Track implements MidiChunk {
+            public int trackNum;
             public MidiIdentifier id;
             public int len;
             public List<Event> events;
+            /** In microseconds per quarter-note */
+            public int tempo;
+            public TimeSignature timeSignature;
 
             /**
              * Constructs and validates a Midi Track
              * @param id The first four bytes of a chunk identify it. Must be "MTrk".
              * @param len The number of bytes in this chunk (excludes the id bytes)
-             * @param events Each event has a delta-time associated with it,
-             *               meaning the amount of time since the previous event (in tickdiv units)
+             * @param events Each event has a delta-time associated with it, meaning the amount of time since the previous event (in tickdiv units)
              * @throws MidiInvalidHeaderException When attempting to construct an invalid Midi Track
              */
             public Track(
+                    int trackNum,
                     byte[] id,
                     int len,
-                    List<Event> events
+                    List<Event> events,
+                    int tempo,
+                    TimeSignature timeSignature
             ) {
                 boolean isTrackChunk = Arrays.equals(id, MidiIdentifier.MTrk.id);
                 if (!isTrackChunk) {
@@ -469,11 +532,34 @@ public class Midi {
                     throw new MidiInvalidHeaderException("A Midi Track's len must be greater than 0. Given: " + len);
                 }
 
-                // TODO: More error checking here
-
                 this.id = MidiIdentifier.MTrk;
                 this.len = len;
                 this.events = events;
+                this.tempo = (tempo <= 0) ? 50_000 : tempo; // Set a default tempo of 120 BPM
+                // The default is 4/4 with a metronome click every 1/4 note
+                this.timeSignature = (timeSignature == null) ? new TimeSignature(4, 2, 24, 8)
+                                                             : timeSignature;
+                this.trackNum = trackNum;
+            }
+
+            /**
+             * Convert the track's events relative delta-times into absolute times in milliseconds
+             * @param tickdiv Comes from the MIDI header
+             * @return The track's events sorted by absolute time in milliseconds
+             */
+            public List<Event> eventsInAbsoluteTime(int tickdiv) {
+                int currentTicks = 0;
+                double msPerTick = tempo / (double)tickdiv / 1000.0;
+
+                List<Event> eventsSortedByAbsoluteTime = new ArrayList<>();
+                for (var event : events) {
+                    currentTicks += event.ticks;
+                    event.absoluteTime = currentTicks * msPerTick;
+                    eventsSortedByAbsoluteTime.add(event);
+                }
+
+                eventsSortedByAbsoluteTime.sort(Comparator.comparingDouble(Event::absoluteTime));
+                return eventsSortedByAbsoluteTime;
             }
         }
 
@@ -499,6 +585,9 @@ public class Midi {
 
             private final int dataStart;
             private final int dataLen;
+
+            /** Is not set until the track sets it */
+            public double absoluteTime;
 
             /**
              * A MidiEvent consists of:
@@ -531,17 +620,9 @@ public class Midi {
                     throw new IllegalStateException("Attempting to parse a NON Meta event as a Meta event! event=" + this);
                 }
                 byte[] msgBytes = ByteFns.fromHex(message);
-
-
                 byte[] data = Arrays.copyOfRange(msgBytes, dataStart, msgBytes.length);
 
-//                if (subType == MidiEventSubType.SET_TEMPO) {
-//                    // The data is three bytes from the upper byte
-//                    data = ByteFns.fromHex(message.substring(6));
-//                    if (data.length != 3) {
-//                        throw new RuntimeException("WTF should be three bytes: " + Arrays.toString(data));
-//                    }
-//                }
+                // Only End of Track events have 0 dataLen
                 if (data.length != dataLen && subType != MidiEventSubType.END_OF_TRACK) {
                     throw new MidiParseException("data.length !+ dataLen: " + Arrays.toString(data) + " " + dataLen);
                 }
@@ -572,7 +653,15 @@ public class Midi {
                         ", subType=" + subType +
                         ", ticks=" + ticks +
                         ", message='" + message + '\'' +
+                        ", useRunningStatus=" + useRunningStatus +
+                        ", dataStart=" + dataStart +
+                        ", dataLen=" + dataLen +
+                        ", absoluteTime=" + absoluteTime +
                         '}';
+            }
+
+            public double absoluteTime() {
+                return absoluteTime;
             }
         }
     }

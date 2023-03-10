@@ -1,5 +1,5 @@
 # COOLMidi prototype
-Java 17+
+requires Java 17+ (might get native executable compilation working)
 
 ## Build
 ```
@@ -8,6 +8,7 @@ jar cfmv coolmidi.jar META-INF/MANIFEST.MF Main.class Midi
 java -jar coolmidi.jar <TEST_MIDI>
 
 # To native executable (in x64 Native Tools CMD Prompt for VS)
+# NOTE: This won't actually run without JAVA_HOME because of some wierd reflection going on in the Java Midi Receiver ???
 set JAVA_HOME="/path/to/GRAALVM/"
 
 cd out/production/cool-midi-proto
@@ -20,5 +21,6 @@ native-image -H:JNIConfigurationFiles=config/jni-config.json Main
 ```
 
 ## What works (and doesn't)
-- Parsing and playback (except that I haven't done any track delta-time synchronization because I somehow thought that 1 thread per track would work out but it doesn't)
+- Parsing and playback (track synchronization works now, but some MIDIs (i've heard it on Undertale_-_Megalovania_v1_2.mid) occasionally fire off a Note On message without a corresponding Note Off and sound awful)
 - Formats 0 & 1 (but not 2)
+- The 16 channel note display works but is kind of buggy (some screen tearing)

@@ -389,10 +389,19 @@ public class Midi {
                 .collect(Collectors.groupingBy(MidiChunk.Event::absoluteTime));
 
         // Make sure that META events are always sent before the MIDI ones otherwise you occasionaly get strange notes in the begining
+        // NOTE: Not my final form...
         for (var chunk : eventChunks.entrySet()) {
             chunk.getValue().sort(Comparator.comparingInt(e -> {
-                if (e.type == MidiEventType.META) return 0;
-                else return 1;
+                if (e.type == MidiEventType.META || e.type == MidiEventType.SYSEX) {
+                    return -2;
+                }
+                else if (e.subType == MidiEventSubType.NOTE_ON) {
+                    return -1;
+                }
+                else if (e.subType == MidiEventSubType.NOTE_OFF) {
+                    return 1;
+                }
+                return 0;
             }));
         }
 

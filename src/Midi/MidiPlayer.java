@@ -140,7 +140,9 @@ public class MidiPlayer {
                 var parsed = event.parseAsMetaEvent();
                 msg.setMessage(parsed.type(), parsed.data(), parsed.len());
 
-                if (event.subType == MidiEventSubType.SET_TEMPO) {
+                if (event.subType == MidiEventSubType.SEQUENCER_SPECIFIC) {
+                    System.out.println("SEQUENCER SPECIFIC meta-event detected: " + event);
+                } else if (event.subType == MidiEventSubType.SET_TEMPO) {
                     System.out.println("TEMPO change in event detected: " + event);
                 }
 
@@ -161,9 +163,9 @@ public class MidiPlayer {
     /**
      * Plays a single MIDI file until completion
      * @param midi The parsed MIDI file to play
-     * @return A future letting the caller know when playback is ended
      */
     private void play(Midi midi, HashMap<Integer, Integer> channels) throws Exception {
+        // Schedule the events in absolute time
         var eventBatches = midi.allEventsInAbsoluteTime();
         Timer timer = new Timer();
         for (var eventBatch : eventBatches) {
@@ -187,6 +189,6 @@ public class MidiPlayer {
         // This is how long we have to sleep until the last event is played
         double lastAbsoluteTime = eventBatches.get(eventBatches.size()-1).get(0).absoluteTime;
         System.out.println("Finished sending the last midi events, now sleeping for: " + lastAbsoluteTime + " ms...");
-        Thread.sleep(Math.round(lastAbsoluteTime));
+        Thread.sleep(Math.round(lastAbsoluteTime)); // TODO: This is not an accurate time, should add how long it took to schedule the events to this
     }
 }

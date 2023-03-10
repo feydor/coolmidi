@@ -31,6 +31,7 @@ public enum MidiEventSubType {
     SMPTE_OFFSET(0x54),
     TIME_SIGNATURE(0x58),
     KEY_SIGNATURE(0x59),
+    SEQUENCER_SPECIFIC(0x7F),
 
     /* Universal SysEx events (manufacturer id == second byte) */
 
@@ -71,6 +72,7 @@ public enum MidiEventSubType {
             case 0x54 -> SMPTE_OFFSET;
             case 0x58 -> TIME_SIGNATURE;
             case 0x59 -> KEY_SIGNATURE;
+            case 0x7F -> SEQUENCER_SPECIFIC;
             default -> UNKNOWN;
         };
     }

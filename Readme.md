@@ -1,6 +1,9 @@
 # COOLMidi prototype
 requires Java 17+ (might get native executable compilation working)
 
+## Screenshot
+![Screenshot](/screenshot-v0.1.0-alpha.png)
+
 ## Build
 ```
 # Jar

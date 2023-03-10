@@ -6,6 +6,7 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MidiPlayer {
     private final List<Midi> midiFiles;
@@ -32,6 +33,13 @@ public class MidiPlayer {
         receiver = MidiSystem.getReceiver();
     }
 
+    /** Used to update the time from a thread */
+    static class TotalTime {
+        int t; // in ms
+        public TotalTime(int t) { this.t = t; }
+        public String toString() { return String.valueOf(t); }
+    }
+
     /**
      * Play all of the loaded files
      */
@@ -40,7 +48,6 @@ public class MidiPlayer {
         System.out.println("Playing the following files: " + filenames);
         ExecutorService executor = Executors.newSingleThreadExecutor();
         for (var midi : midiFiles) {
-
             var channels = new HashMap<Integer, Integer>();
             for (int i = 0; i < midi.channelUsed.length; ++i) {
                 if (midi.channelUsed[i]) {
@@ -49,20 +56,20 @@ public class MidiPlayer {
             }
             System.out.println("# of channels used: " + channels.size());
 
+            TotalTime absoluteTime = new TotalTime(0);
             Future<Void> future = executor.submit(() -> {
-                play(midi, channels);
+                play(midi, channels, absoluteTime);
                 return null;
             });
 
             final int[] filenamePos = {0};
             long ms = 0;
+            System.out.print("\033[H\033[2J");
+            System.out.flush();
             while (!future.isDone()) {
-//                System.out.print("\033[H\033[2J");
-//                System.out.flush();
                 System.out.print("\033[" + 1 + ";" + 1 + "H");
                 System.out.println("CoolMidi v0.1.0 " + "/".repeat(TERM_WIDTH-16));
-
-                System.out.print("\033[" + 3 + ";" + 1 + "H");
+                System.out.print("\033[" + 2 + ";" + 1 + "H");
                 System.out.print(" ".repeat(TERM_WIDTH));
                 System.out.print("\r");
                 int start = filenamePos[0];
@@ -87,6 +94,10 @@ public class MidiPlayer {
 
                 filenamePos[0] = Math.min(filenamePos[0]+1, TERM_WIDTH+midi.filename.length());
 
+                // print running time here / total time
+                System.out.print("\033[" + 3 + ";" + 1 + "H");
+                System.out.println("time: " + ms++ + "/" + absoluteTime);
+
                 System.out.print("\033[" + 4 + ";" + 1 + "H");
                 for (var entry : channels.entrySet()) {
                     int ch = entry.getKey();
@@ -99,7 +110,6 @@ public class MidiPlayer {
                     int spaces = ((ch+1) / 10) > 0 ? 0 : 1; // for padding digits
                     System.out.println(" ".repeat(spaces) + (ch + 1) + " " + ansiColor + "#".repeat(magnitude) + " " + hexNote(channels.get(ch)) + "\u001B[0m");
                 }
-                System.out.print(ms++);
                 Thread.sleep(100);
             }
 
@@ -140,11 +150,11 @@ public class MidiPlayer {
                 var parsed = event.parseAsMetaEvent();
                 msg.setMessage(parsed.type(), parsed.data(), parsed.len());
 
-                if (event.subType == MidiEventSubType.SEQUENCER_SPECIFIC) {
-                    System.out.println("SEQUENCER SPECIFIC meta-event detected: " + event);
-                } else if (event.subType == MidiEventSubType.SET_TEMPO) {
-                    System.out.println("TEMPO change in event detected: " + event);
-                }
+//                if (event.subType == MidiEventSubType.SEQUENCER_SPECIFIC) {
+//                    System.out.println("SEQUENCER SPECIFIC meta-event detected: " + event);
+//                } else if (event.subType == MidiEventSubType.SET_TEMPO) {
+//                    System.out.println("TEMPO change in event detected: " + event);
+//                }
 
                 yield msg;
             }
@@ -164,7 +174,7 @@ public class MidiPlayer {
      * Plays a single MIDI file until completion
      * @param midi The parsed MIDI file to play
      */
-    private void play(Midi midi, HashMap<Integer, Integer> channels) throws Exception {
+    private void play(Midi midi, HashMap<Integer, Integer> channels, TotalTime totalTime) throws Exception {
         // Schedule the events in absolute time
         var eventBatches = midi.allEventsInAbsoluteTime();
         Timer timer = new Timer();
@@ -188,7 +198,8 @@ public class MidiPlayer {
 
         // This is how long we have to sleep until the last event is played
         double lastAbsoluteTime = eventBatches.get(eventBatches.size()-1).get(0).absoluteTime;
-        System.out.println("Finished sending the last midi events, now sleeping for: " + lastAbsoluteTime + " ms...");
+        totalTime.t = (int)(lastAbsoluteTime / 100);
+        // System.out.println("Finished sending the last midi events, now sleeping for: " + lastAbsoluteTime + " ms...");
         Thread.sleep(Math.round(lastAbsoluteTime)); // TODO: This is not an accurate time, should add how long it took to schedule the events to this
     }
 }

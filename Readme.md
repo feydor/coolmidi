@@ -1,11 +1,28 @@
-# COOLMidi prototype
-requires Java 17+ (might get native executable compilation working)
+CoolMidi
+========
+Introduction
+------------
+A MIDI parser, sequencer, and CLI player with the following features:
+* Support for format 0 & 1 MIDI files including the following standards: GM, XG, GS
+* Plays back all provided MIDI files in the given order (playlist support)
+* CLI UI to display the last note on each of the maximum 16 MIDI channels
+* MIDI files with [running status](http://midi.teragonaudio.com/tech/midispec/run.htm) work fine
+* ~~The name sounds like chlamydia~~
 
-## Screenshot
+And also what isn't supported (yet):
+* Format 2 MIDI files
+* Some MIDI files that have their tempo information encoded in BPM instead of the standard Pulse Per Quarter Note (PPQN) will play a lot slower than expected
+* There's likely a lot MIDI files out their with broken headers that will raise an exception in CoolMIDI
+
+UI Screenshot
+-------------
 ![Screenshot](/screenshot-v0.1.0-alpha.png)
 
-## Build
+Build
+-----
 ```
+# requires Java 17+
+
 # Jar
 jar cfmv coolmidi.jar META-INF/MANIFEST.MF io.feydor.MidiCliPlayer.class io.feydor.midi
 java -jar coolmidi.jar <TEST_MIDI>
@@ -23,6 +40,24 @@ java -agentlib:native-image-agent=config-merge-dir=./config io.feydor.MidiCliPla
 native-image -H:JNIConfigurationFiles=config/jni-config.json io.feydor.MidiCliPlayer
 ```
 
-## What works (and doesn't)
-- Parsing and playback (track synchronization works now, but some MIDIs (i've heard it on Undertale_-_Megalovania_v1_2.mid) occasionally fire off a Note On message without a corresponding Note Off and sound awful)
-- Formats 0 & 1 (but not 2)
+License
+-------
+Copyright © 2023 Victor Reyes. (MIT License)  
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+* The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+* The Software is provided "as is", without warranty of any kind, express or
+  implied, including but not limited to the warranties of merchantability,
+  fitness for a particular purpose and noninfringement. In no event shall the
+  authors or copyright holders be liable for any claim, damages or other
+  liability, whether in an action of contract, tort or otherwise, arising from,
+  out of or in connection with the Software or the use or other dealings in the
+  Software.

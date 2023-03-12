@@ -7,20 +7,20 @@ requires Java 17+ (might get native executable compilation working)
 ## Build
 ```
 # Jar
-jar cfmv coolmidi.jar META-INF/MANIFEST.MF MidiCliPlayer.class Midi
+jar cfmv coolmidi.jar META-INF/MANIFEST.MF io.feydor.MidiCliPlayer.class io.feydor.midi
 java -jar coolmidi.jar <TEST_MIDI>
 
 # To native executable (in x64 Native Tools CMD Prompt for VS)
-# NOTE: This won't actually run without JAVA_HOME because of some wierd reflection going on in the Java Midi Receiver ???
+# NOTE: This won't actually run without JAVA_HOME because of some wierd reflection going on in the Java io.feydor.midi Receiver ???
 set JAVA_HOME="/path/to/GRAALVM/"
 
 cd out/production/cool-midi-proto
 
 # running agentlib to detect dynamic features
-java -agentlib:native-image-agent=config-merge-dir=./config MidiCliPlayer <TEST_MIDI>
+java -agentlib:native-image-agent=config-merge-dir=./config io.feydor.MidiCliPlayer <TEST_MIDI>
 
 # build the executable
-native-image -H:JNIConfigurationFiles=config/jni-config.json MidiCliPlayer
+native-image -H:JNIConfigurationFiles=config/jni-config.json io.feydor.MidiCliPlayer
 ```
 
 ## What works (and doesn't)

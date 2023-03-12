@@ -14,7 +14,7 @@ public enum MidiEventType {
 
     // META_TIMING_RELATED(0xFF0), Marker, Cue Point, Tempo, SMPTE Offset, Time Signature, and Key Signature
 
-    final int id;
+    public final int id;
 
     MidiEventType(int id) {
         this.id = id;

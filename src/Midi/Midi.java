@@ -24,10 +24,10 @@ import java.util.stream.Collectors;
  * </ul>
  */
 public class Midi {
-    public String filename;
     public MidiChunk.Header header;
     public List<MidiChunk.Track> tracks = new ArrayList<>();
-    public boolean[] channelUsed = new boolean[16];
+    public boolean[] channelsUsed = new boolean[16];
+    public String filename;
     private static final String END_OF_TRACK = "FF2f00";
 
     /**
@@ -73,7 +73,7 @@ public class Midi {
             byte[] id = file.readNBytes(4);
             int len = ByteFns.toUnsignedInt(file.readNBytes(4));
 
-            var parsedTrack = parseMidiTrack(file, id, len, i, channelUsed);
+            var parsedTrack = parseMidiTrack(file, id, len, i, channelsUsed);
 
             // The bytes read must equal the track len
             if (parsedTrack.len != len) {
@@ -384,7 +384,7 @@ public class Midi {
             eventsSortedByAbsoluteTime.addAll(trackEventsSorted);
         }
 
-        var eventChunks =  eventsSortedByAbsoluteTime.stream()
+        Map<Double, List<MidiChunk.Event>> eventChunks =  eventsSortedByAbsoluteTime.stream()
                 .filter(event -> event.subType != MidiEventSubType.END_OF_TRACK)
                 .collect(Collectors.groupingBy(MidiChunk.Event::absoluteTime));
 
@@ -641,10 +641,10 @@ public class Midi {
 
             public ChannelMidiEventParseResult parseAsChannelMidiEvent() {
                 if (type != MidiEventType.MIDI) {
-                    throw new IllegalStateException("Attempting to parse a NON Midi event as a Midi event! " + type);
+                    throw new IllegalStateException("Attempting to parse a NON Midi event as a Midi event! " + this);
                 }
                 if (!subType.isChannelType()) {
-                    throw new RuntimeException("Channel Midi Event is fucked: " + message);
+                    throw new RuntimeException("Attempting to parse a non-channel MIDI event! " + this);
                 }
 
                 int cmd = Integer.parseUnsignedInt(message.substring(0, 2), 16);

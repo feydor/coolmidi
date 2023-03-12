@@ -7,7 +7,7 @@ requires Java 17+ (might get native executable compilation working)
 ## Build
 ```
 # Jar
-jar cfmv coolmidi.jar META-INF/MANIFEST.MF Main.class Midi
+jar cfmv coolmidi.jar META-INF/MANIFEST.MF MidiCliPlayer.class Midi
 java -jar coolmidi.jar <TEST_MIDI>
 
 # To native executable (in x64 Native Tools CMD Prompt for VS)
@@ -17,10 +17,10 @@ set JAVA_HOME="/path/to/GRAALVM/"
 cd out/production/cool-midi-proto
 
 # running agentlib to detect dynamic features
-java -agentlib:native-image-agent=config-merge-dir=./config Main <TEST_MIDI>
+java -agentlib:native-image-agent=config-merge-dir=./config MidiCliPlayer <TEST_MIDI>
 
 # build the executable
-native-image -H:JNIConfigurationFiles=config/jni-config.json Main
+native-image -H:JNIConfigurationFiles=config/jni-config.json MidiCliPlayer
 ```
 
 ## What works (and doesn't)

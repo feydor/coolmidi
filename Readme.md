@@ -26,4 +26,3 @@ native-image -H:JNIConfigurationFiles=config/jni-config.json MidiCliPlayer
 ## What works (and doesn't)
 - Parsing and playback (track synchronization works now, but some MIDIs (i've heard it on Undertale_-_Megalovania_v1_2.mid) occasionally fire off a Note On message without a corresponding Note Off and sound awful)
 - Formats 0 & 1 (but not 2)
-- The 16 channel note display works but is kind of buggy (some screen tearing)

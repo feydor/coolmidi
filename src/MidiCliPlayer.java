@@ -122,6 +122,7 @@ public final class MidiCliPlayer {
                     int spaces = ((ch+1) / 10) > 0 ? 0 : 1; // for padding digits
                     System.out.println(" ".repeat(spaces) + (ch + 1) + " " + ansiColor + "#".repeat(magnitude) + " " + toMusicalNote(channels.get(ch)) + "\u001B[0m");
                 }
+                //noinspection BusyWait
                 Thread.sleep(tickLength);
             }
 

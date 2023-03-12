@@ -19,7 +19,7 @@ class VarLenQuantTest {
     static void setup() {
         // write the binary file to use in the tests
         try {
-            String binaryFile = "varlen.bin";
+            String binaryFile = "test/varlen.bin";
             FileOutputStream fileOutStream = new FileOutputStream(binaryFile);
             BufferedOutputStream fileOut = new BufferedOutputStream(fileOutStream);
             fileOut.write(firstBuffer);
@@ -37,7 +37,7 @@ class VarLenQuantTest {
 
     @Test
     void varlenParseWorks() throws IOException {
-        /**
+        /*
          * Examples of numbers represented as variable-length quantities
          * Value (hex)	Representation (hex)
          * 00000000 	00

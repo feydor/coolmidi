@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class MidiTest {
 
-    String testFile = "bowser_1.mid";
+    String testFile = "test/bowser_1.mid";
 
     @Test
     void midiHeaderParseWorks() throws IOException {

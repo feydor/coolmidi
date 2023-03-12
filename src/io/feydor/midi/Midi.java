@@ -41,12 +41,6 @@ public class Midi {
     }
 
     private void parseMidiFile(String filename) throws IOException {
-        String[] partsOfFilename = filename.split("\\.");
-        boolean isMidiFile = partsOfFilename.length == 2 && partsOfFilename[1].equalsIgnoreCase("MID");
-        if (!isMidiFile) {
-            throw new MidiParseException("Not a midi file!: " + filename);
-        }
-
         FileInputStream filestream;
         BufferedInputStream file;
         try {
@@ -77,8 +71,8 @@ public class Midi {
 
             // The bytes read must equal the track len
             if (parsedTrack.len != len) {
-                throw new MidiParseException("FUCKED UP parsing a track: ntrack="
-                        + i + " id=" + Arrays.toString(id) + " parsedTrack.len=" + parsedTrack.len);
+                throw new MidiParseException("Messed up parsing a track: ntrack=" + i + " id=" + Arrays.toString(id) +
+                        " parsedTrack.len=" + parsedTrack.len);
             }
 
             tracks.add(parsedTrack.track);
@@ -124,7 +118,7 @@ public class Midi {
     private MidiTrackParseResult parseMidiTrack(BufferedInputStream file, byte[] id, int len, int trackNum, boolean[] channelUsed) throws IOException {
         boolean isTrackChunk = Arrays.equals(id, MidiIdentifier.MTrk.id);
         if (!isTrackChunk) {
-            throw new MidiParseException("FUCKED UP parsing a track header! id=" + Arrays.toString(id));
+            throw new MidiParseException("Messed up parsing a track header! id=" + Arrays.toString(id));
         }
 
         // Now time for event parsing
@@ -307,11 +301,9 @@ public class Midi {
                 case SYSEX -> {
                     // SysEx event:
                     // Complete message: <F0> <len:VarLen> <message:len B>
-                    // TODO: I think I can just treat these like the varlen text events, same with 0xF7
                     var length = VarLenQuant.from(file);
                     file.skipNBytes(length.value);
                     messageLen += length.value + length.nbytes;
-                    // throw new MidiParseException("SysEx events (0xF0 and 0xF7) are not implemented yet!");
                 }
                 case UNKNOWN -> {
                     String msg = String.format("Unexpected MIDI message!\n" +
@@ -342,12 +334,6 @@ public class Midi {
             var event = new MidiChunk.Event(eventType, subType, dt.value, message, useRunningStatus, dataStart, dataLen);
             prevEvent = event;
             prevStatus = status;
-
-            // TODO: Remove, this is for debugging
-            if (subType == MidiEventSubType.SET_TEMPO) {
-                System.out.println("Tempo message detected: " + event);
-            }
-
             events.add(event);
         }
 
@@ -362,7 +348,7 @@ public class Midi {
         if (header.format == MidiFileFormat.FORMAT_1 && trackNum > 1) {
             var timingRelatedEvents = events.stream().filter(e -> e.subType.isTimingRelated()).toList();
             if (timingRelatedEvents.size() > 0) {
-                String msg = String.format("In a format 0 io.feydor.Midi file, track#2+ must NOT have any timing rleated Meta Events," +
+                String msg = String.format("In a format 0 Midi file, track#2+ must NOT have any timing related Meta Events," +
                         "but timing related Meta events were encountered!\n" +
                         "track#=%d, bytesRead=%d, timing related events=%s", trackNum, bytesRead, timingRelatedEvents);
                 throw new MidiParseException(msg);
@@ -459,12 +445,12 @@ public class Midi {
                           byte[] tickdiv) {
                 boolean isMidiHeader = Arrays.equals(id, MidiIdentifier.MThd.id);
                 if (!isMidiHeader) {
-                    throw new MidiInvalidHeaderException("A io.feydor.Midi Header chunk's identifier must be the ASCII characters 'MThd'! Given: " + Arrays.toString(id));
+                    throw new MidiInvalidHeaderException("Not a MIDI File: A Midi Header chunk's identifier must be the ASCII characters 'MThd'! Given: " + Arrays.toString(id));
                 }
 
                 int BYTES_IN_MTHD = 6;
                 if (len != BYTES_IN_MTHD) {
-                    throw new MidiInvalidHeaderException("A io.feydor.Midi Header chunk must be " + BYTES_IN_MTHD + " bytes in size! Given: " + len);
+                    throw new MidiInvalidHeaderException("A Midi Header chunk must be " + BYTES_IN_MTHD + " bytes in size! Given: " + len);
                 }
 
                 var validatedFormat = VALID_FORMATS.entrySet().stream()
@@ -476,9 +462,9 @@ public class Midi {
                 }
 
                 if (validatedFormat.get() == MidiFileFormat.FORMAT_0 && ntracks != 1) {
-                    throw new MidiInvalidHeaderException("A format 0 io.feydor.Midi Header can only have 1 track! Given: " + ntracks);
+                    throw new MidiInvalidHeaderException("A format 0 Midi Header can only have 1 track! Given: " + ntracks);
                 } else if (ntracks < 1) {
-                    throw new MidiInvalidHeaderException("A format 1 or 2 io.feydor.Midi Header chunk must have more than have one or more tracks! Given: " + ntracks);
+                    throw new MidiInvalidHeaderException("A format 1 or 2 Midi Header chunk must have more than have one or more tracks! Given: " + ntracks);
                 }
 
                 // Based on the MSB of tickdiv, set useMetricalTiming
@@ -534,11 +520,11 @@ public class Midi {
             ) {
                 boolean isTrackChunk = Arrays.equals(id, MidiIdentifier.MTrk.id);
                 if (!isTrackChunk) {
-                    throw new MidiInvalidHeaderException("A io.feydor.Midi Track chunk's identifier must be the ASCII characters 'MTrk'! Given: " + Arrays.toString(id));
+                    throw new MidiInvalidHeaderException("A Midi Track chunk's identifier must be the ASCII characters 'MTrk'! Given: " + Arrays.toString(id));
                 }
 
                 if (len < 0) {
-                    throw new MidiInvalidHeaderException("A io.feydor.Midi Track's len must be greater than 0. Given: " + len);
+                    throw new MidiInvalidHeaderException("A Midi Track's len must be greater than 0. Given: " + len);
                 }
 
                 this.id = MidiIdentifier.MTrk;
@@ -641,7 +627,7 @@ public class Midi {
 
             public ChannelMidiEventParseResult parseAsChannelMidiEvent() {
                 if (type != MidiEventType.MIDI) {
-                    throw new IllegalStateException("Attempting to parse a NON io.feydor.Midi event as a io.feydor.Midi event! " + this);
+                    throw new IllegalStateException("Attempting to parse a NON Midi event as a Midi event! " + this);
                 }
                 if (!subType.isChannelType()) {
                     throw new RuntimeException("Attempting to parse a non-channel MIDI event! " + this);

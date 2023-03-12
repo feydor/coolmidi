@@ -12,6 +12,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.Stream;
 
+/**
+ * Plays a list of MIDI files using the OS's default MIDI synthesizer and displays a CLI UI with the current notes
+ * for up to the maximum 16 MIDI channels. Midi files play front beginning to end, in the order they were passed in.
+ *
+ * <p>Usage: java MidiCliPlayer file1.mid file2.mid</p>
+ */
 public final class MidiCliPlayer {
     private final List<Midi> playlist;
     private final Receiver receiver;
@@ -20,20 +26,21 @@ public final class MidiCliPlayer {
     public static void main(String[] args) throws Exception {
         if (args.length < 1) {
             printOptions();
+            System.exit(1);
             return;
-        }
-
-        if (Stream.of(args).anyMatch(arg -> arg.equalsIgnoreCase("-V"))) {
+        } else if (Stream.of(args).anyMatch(arg -> arg.equalsIgnoreCase("-V"))) {
             printVersion();
+            System.exit(1);
             return;
         }
 
         MidiCliPlayer player = new MidiCliPlayer(args);
-        player.play();
+        player.scheduleEventsAndWait();
     }
 
     public MidiCliPlayer(String[] filenames) throws MidiUnavailableException {
-        playlist = Arrays.stream(filenames).map(filename -> {
+        // Filter out the invalid Midi files
+        playlist = Stream.of(filenames).map(filename -> {
             try {
                 return new Midi(filename);
             } catch (IOException e) {
@@ -42,23 +49,21 @@ public final class MidiCliPlayer {
             }
         }).filter(Objects::nonNull).toList();
 
-        // Get the default MIDI device
+        // Get the default MIDI device and its receiver
         var devices = MidiSystem.getMidiDeviceInfo();
         System.out.println("# of devices: " + devices.length);
         System.out.println("Available devices: " + Arrays.toString(devices));
         receiver = MidiSystem.getReceiver();
     }
 
-    /**
-     * Play all of the loaded files
-     */
-    public void play() throws Exception {
+    /** Play all of the loaded files */
+    public void scheduleEventsAndWait() throws Exception {
         List<String> filenames = playlist.stream().map(m -> m.filename).toList();
         System.out.println("Playing the following files: " + filenames);
 
         // For each MIDI file,
         // i. Extract the # of channels used into a map of channel# and its current value
-        // ii. Sequence and play it in a new thread
+        // ii. Sequence and play the file in a new thread, passing in the channels map to keep track of note values
         // iii. In the thread, display the UI
         ExecutorService executor = Executors.newSingleThreadExecutor();
         for (Midi midi : playlist) {
@@ -70,16 +75,19 @@ public final class MidiCliPlayer {
             }
             System.out.println("# of channels used: " + channels.size());
 
-            var timeRemaining = new TotalTime(0); // The remaining time left in the file (set by playing thread)
+            // Start playback in a new thread which will update the channel map and the time remaining
+            // and then sleep until the last event in the file
+            var timeRemaining = new TotalTime(0);
             int tickLength = 100; // The length of each tick in the UI thread (this thread)
-            Future<Void> future = executor.submit(() -> play(midi, channels, timeRemaining, tickLength));
+            Future<Void> schedulerThread = executor.submit(() -> scheduleEventsAndWait(midi, channels, timeRemaining, tickLength));
 
+            // Display the UI while the playing thread sleeps
             int filenamePos = 0;
             long ticks = 0;
             int TERM_WIDTH = 100;
             System.out.print("\033[H\033[2J");
             System.out.flush();
-            while (!future.isDone()) {
+            while (!schedulerThread.isDone()) {
                 System.out.print("\033[" + 1 + ";" + 1 + "H");
                 System.out.println("CoolMidi v0.1.0 " + "/".repeat(TERM_WIDTH - 16));
                 System.out.print("\033[" + 2 + ";" + 1 + "H");
@@ -124,6 +132,8 @@ public final class MidiCliPlayer {
                     int spaces = ((ch+1) / 10) > 0 ? 0 : 1; // for padding digits
                     System.out.println(" ".repeat(spaces) + (ch + 1) + " " + ansiColor + "#".repeat(magnitude) + " " + toMusicalNote(channels.get(ch)) + "\u001B[0m");
                 }
+
+                // Sleep for tickLength to set a decent refresh rate
                 //noinspection BusyWait
                 Thread.sleep(tickLength);
             }
@@ -133,9 +143,19 @@ public final class MidiCliPlayer {
 
         executor.shutdown();
         System.out.println("END");
+        System.exit(0);
     }
 
-    public Void play(Midi midi, Map<Integer, Integer> channels, TotalTime timeRemaining, int tickLength) throws InterruptedException {
+    /**
+     * Sequences the events in a MIDI file and schedules when they will be sent according to each event's deltatime (in absolute time).
+     * Should be run in a new thread.
+     * @param midi The file to playback
+     * @param channels A map of channels used to their values. Set by this method.
+     * @param timeRemaining The file's remaining time. Set by this method.
+     * @param tickLength The length of each tick in the calling thread. Used to set the timeRemaining.
+     * @throws InterruptedException When the thread is interrupted somehow
+     */
+    private Void scheduleEventsAndWait(Midi midi, Map<Integer, Integer> channels, TotalTime timeRemaining, int tickLength) throws InterruptedException {
         // Schedule the events in absolute time
         var eventBatches = midi.allEventsInAbsoluteTime();
         Timer timer = new Timer();
@@ -159,6 +179,7 @@ public final class MidiCliPlayer {
         }
 
         // Calculate how long the thread has to sleep until the last event is played
+        // Making sure to set that time in timeRemaining
         long totalSequencingTimeMs = (System.nanoTime() - beforeSequencing) / 1_000_000;
         double lastEventTime = eventBatches.get(eventBatches.size()-1).get(0).absoluteTime;
         double timeUntilLastEvent = lastEventTime - totalSequencingTimeMs;
@@ -167,6 +188,13 @@ public final class MidiCliPlayer {
         return null;
     }
 
+    /**
+     * Parses each event into the format required to the Java MidiSystem Receiver.
+     * @param event The MIDI event to parse
+     * @param channels The map of channels and their values to update
+     * @return The formatted message ready to be sent
+     * @throws InvalidMidiDataException When an invalid MIDI event is encountered
+     */
     private MidiMessage makeMidiMessage(Midi.MidiChunk.Event event, Map<Integer, Integer> channels) throws InvalidMidiDataException {
         return switch (event.type) {
             case MIDI -> {

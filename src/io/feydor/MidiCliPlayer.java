@@ -241,15 +241,14 @@ public final class MidiCliPlayer {
         if (note == 0) return "";
         return NOTES[note % NOTES.length];
     }
-
     private static void printOptions() {
-        String msg = "\nCOOL io.feydor.Midi\n\nUsage: cmidi [MIDI Files]\n\n";
+        String msg = "\nCOOL Midi\n\nUsage: cmidi [MIDI Files]\n\n";
         msg += "Options:\n  -V   Print version information";
         System.out.println(msg);
     }
 
     private static void printVersion() {
-        String msg = "COOl io.feydor.Midi 0.1.0\nCopyright (C) 2023 feydor\n";
+        String msg = "COOL Midi 0.1.0\nCopyright (C) 2023 feydor\n";
         System.out.println(msg);
     }
 }

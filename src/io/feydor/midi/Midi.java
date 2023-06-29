@@ -348,10 +348,10 @@ public class Midi {
         if (header.format == MidiFileFormat.FORMAT_1 && trackNum > 1) {
             var timingRelatedEvents = events.stream().filter(e -> e.subType.isTimingRelated()).toList();
             if (timingRelatedEvents.size() > 0) {
-                String msg = String.format("In a format 0 Midi file, track#2+ must NOT have any timing related Meta Events," +
+                String msg = String.format("WARNING: In a format 1 Midi file, track#2+ must NOT have any timing related Meta Events," +
                         "but timing related Meta events were encountered!\n" +
                         "track#=%d, bytesRead=%d, timing related events=%s", trackNum, bytesRead, timingRelatedEvents);
-                throw new MidiParseException(msg);
+                System.out.println(msg);
             }
         }
 
@@ -530,8 +530,9 @@ public class Midi {
                 this.id = MidiIdentifier.MTrk;
                 this.len = len;
                 this.events = events;
-                this.tempo = (tempo <= 0) ? 50_000 : tempo; // Set a default tempo of 120 BPM
-                // The default is 4/4 with a metronome click every 1/4 note
+                // Set the default tempo of 500,000 microseconds per beat (120 BPM)
+                this.tempo = (tempo <= 0) ? 500_000 : tempo;
+                // Set the default time signature of 4/4 with a metronome click every 1/4 note
                 this.timeSignature = (timeSignature == null) ? new TimeSignature(4, 2, 24, 8)
                                                              : timeSignature;
                 this.trackNum = trackNum;
@@ -555,6 +556,17 @@ public class Midi {
 
                 eventsSortedByAbsoluteTime.sort(Comparator.comparingDouble(Event::absoluteTime));
                 return eventsSortedByAbsoluteTime;
+            }
+
+            @Override
+            public String toString() {
+                return "Track{" +
+                        "trackNum=" + trackNum +
+                        ", id=" + id +
+                        ", len=" + len +
+                        ", tempo=" + tempo +
+                        ", timeSignature=" + timeSignature +
+                        '}';
             }
         }
 
@@ -660,35 +672,6 @@ public class Midi {
             }
         }
     }
-}
-
-/**
- * There are three types of io.feydor.Midi File formats:
- * <ul>
- *     <li>0: a single multi-channel track</li>
- *     <li>1: two or more tracks all played simultaneously</li>
- *     <li>2: one or more tracks played independently</li>
- * </ul>
- */
-enum MidiFileFormat {
-    /** Single multi-channel track */
-    FORMAT_0((short)0),
-
-    /**
-     * The most common format in MIDI.
-     * Two or more track chunks (header.ntracks) to be played simultaneously:
-     * <ul>
-     *     <li>the first is the tempo track,</li>
-     *     <li>the second is the note data</li>
-     * </ul>
-     */
-    FORMAT_1((short)1),
-
-    /** one or more Track chunks to be played independently */
-    FORMAT_2((short)2);
-
-    final short word;
-    MidiFileFormat(short word) { this.word = word; }
 }
 
 /**

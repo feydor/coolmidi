@@ -22,8 +22,10 @@ public final class MidiCliPlayer {
     private final List<Midi> playlist;
     private final Receiver receiver;
     private final static String[] NOTES = new String[]{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    private final boolean useTrackerUi;
 
     public static void main(String[] args) throws Exception {
+        var useTrackerUi = false;
         if (args.length < 1) {
             printOptions();
             System.exit(1);
@@ -32,13 +34,16 @@ public final class MidiCliPlayer {
             printVersion();
             System.exit(1);
             return;
+        } else if (Arrays.asList(args).contains("-A")) {
+            useTrackerUi = true;
+            args = Arrays.stream(args).filter(arg -> !arg.equals("-A")).toList().toArray(new String[]{});
         }
 
-        MidiCliPlayer player = new MidiCliPlayer(args);
+        MidiCliPlayer player = new MidiCliPlayer(args, useTrackerUi);
         player.scheduleEventsAndWait();
     }
 
-    public MidiCliPlayer(String[] filenames) throws MidiUnavailableException {
+    public MidiCliPlayer(String[] filenames, boolean useTrackerUi) throws MidiUnavailableException {
         // Filter out the invalid Midi files
         playlist = Stream.of(filenames).map(filename -> {
             try {
@@ -54,6 +59,7 @@ public final class MidiCliPlayer {
         System.out.println("# of devices: " + devices.length);
         System.out.println("Available devices: " + Arrays.toString(devices));
         receiver = MidiSystem.getReceiver();
+        this.useTrackerUi = useTrackerUi;
     }
 
     /** Play all of the loaded files */
@@ -82,60 +88,28 @@ public final class MidiCliPlayer {
             Future<Void> schedulerThread = executor.submit(() -> scheduleEventsAndWait(midi, channels, timeRemaining, tickLength));
 
             // Display the UI while the playing thread sleeps
-            int filenamePos = 0;
-            long ticks = 0;
-            int TERM_WIDTH = 100;
-            System.out.print("\033[H\033[2J");
-            System.out.flush();
-            while (!schedulerThread.isDone()) {
-                System.out.print("\033[" + 1 + ";" + 1 + "H");
-                System.out.println("CoolMidi v0.1.0 " + "/".repeat(TERM_WIDTH - 16));
-                System.out.print("\033[" + 2 + ";" + 1 + "H");
-                System.out.print(" ".repeat(TERM_WIDTH));
-                System.out.print("\r");
+            if (useTrackerUi) {
+                double t = 0;
+                int maxMsgLen = 6;
+                var eventBatches = midi.allEventsInAbsoluteTime();
+                for (var eventBatch : eventBatches) {
+                    // print the events on one line
+                    var sb = new StringBuilder();
+                    for (var event : eventBatch) {
+                        int spaces = maxMsgLen - event.message.length();
+                        spaces = Math.max(spaces, 0);
+                        sb.append("| ").append(event.message).append(" ".repeat(spaces+1));
+                    }
+                    sb.append("|");
+                    System.out.println(sb);
 
-                // Scrolling filename with wrap around
-                int start = filenamePos;
-                int end = start + midi.filename.length();
-                int diff = TERM_WIDTH - end;
-                String overflowChars;
-                int pivot;
-                if (diff <= -1*midi.filename.length()) {
-                    filenamePos = 0;
-                    start = 0;
-                    System.out.print(" ".repeat(start) + midi.filename);
-                } else if (diff < 0) {
-                    // print overflow characters from filename (starting at the end)
-                    pivot = Math.abs(diff);
-                    overflowChars = midi.filename.substring(midi.filename.length()-1-pivot);
-                    System.out.print(overflowChars);
-                    System.out.print(" ".repeat(TERM_WIDTH - overflowChars.length() - (midi.filename.length()-overflowChars.length())));
-                    System.out.print(midi.filename.substring(0, midi.filename.length()-pivot-1));
-                } else {
-                    System.out.print(" ".repeat(start) + midi.filename);
+                    // sleep for the absolute time - current time
+                    double dt = Math.abs(t - eventBatch.get(0).absoluteTime);
+                    Thread.sleep((long) dt);
+                    t = eventBatch.get(0).absoluteTime;
                 }
-
-                filenamePos = Math.min(filenamePos+1, TERM_WIDTH +midi.filename.length());
-
-                System.out.print("\033[" + 3 + ";" + 1 + "H");
-                System.out.println("time: " + ticks++ + "/" + timeRemaining);
-
-                System.out.print("\033[" + 4 + ";" + 1 + "H");
-                for (var entry : channels.entrySet()) {
-                    int ch = entry.getKey();
-                    int val = entry.getValue();
-                    System.out.print("\r");
-                    System.out.print(" ".repeat(TERM_WIDTH));
-                    System.out.print("\r");
-                    int magnitude = Math.min(Math.max(val - 20, 0), TERM_WIDTH -30);
-                    String ansiColor = "\u001B[3" + ((magnitude % 7) + 1) + "m"; // Red -> Cyan
-                    int spaces = ((ch+1) / 10) > 0 ? 0 : 1; // for padding digits
-                    System.out.println(" ".repeat(spaces) + (ch + 1) + " " + ansiColor + "#".repeat(magnitude) + " " + toMusicalNote(channels.get(ch)) + "\u001B[0m");
-                }
-
-                // Sleep for tickLength to set a decent refresh rate
-                //noinspection BusyWait
-                Thread.sleep(tickLength);
+            } else {
+                nowPlayingUi(midi, channels, timeRemaining, tickLength, schedulerThread);
             }
 
             System.out.println("Finished playing: " + midi.filename);
@@ -144,6 +118,64 @@ public final class MidiCliPlayer {
         executor.shutdown();
         System.out.println("END");
         System.exit(0);
+    }
+
+    private void nowPlayingUi(Midi midi, HashMap<Integer, Integer> channels, TotalTime timeRemaining, int tickLength, Future<Void> schedulerThread) throws InterruptedException {
+        int filenamePos = 0;
+        long ticks = 0;
+        int TERM_WIDTH = 100;
+        System.out.print("\033[H\033[2J");
+        System.out.flush();
+        while (!schedulerThread.isDone()) {
+            System.out.print("\033[" + 1 + ";" + 1 + "H");
+            System.out.println("CoolMidi v0.1.0 " + "/".repeat(TERM_WIDTH - 16));
+            System.out.print("\033[" + 2 + ";" + 1 + "H");
+            System.out.print(" ".repeat(TERM_WIDTH));
+            System.out.print("\r");
+
+            // Scrolling filename with wrap around
+            int start = filenamePos;
+            int end = start + midi.filename.length();
+            int diff = TERM_WIDTH - end;
+            String overflowChars;
+            int pivot;
+            if (diff <= -1* midi.filename.length()) {
+                filenamePos = 0;
+                start = 0;
+                System.out.print(" ".repeat(start) + midi.filename);
+            } else if (diff < 0) {
+                // print overflow characters from filename (starting at the end)
+                pivot = Math.abs(diff);
+                overflowChars = midi.filename.substring(midi.filename.length()-1-pivot);
+                System.out.print(overflowChars);
+                System.out.print(" ".repeat(TERM_WIDTH - overflowChars.length() - (midi.filename.length()-overflowChars.length())));
+                System.out.print(midi.filename.substring(0, midi.filename.length()-pivot-1));
+            } else {
+                System.out.print(" ".repeat(start) + midi.filename);
+            }
+
+            filenamePos = Math.min(filenamePos+1, TERM_WIDTH + midi.filename.length());
+
+            System.out.print("\033[" + 3 + ";" + 1 + "H");
+            System.out.println("time: " + ticks++ + "/" + timeRemaining);
+
+            System.out.print("\033[" + 4 + ";" + 1 + "H");
+            for (var entry : channels.entrySet()) {
+                int ch = entry.getKey();
+                int val = entry.getValue();
+                System.out.print("\r");
+                System.out.print(" ".repeat(TERM_WIDTH));
+                System.out.print("\r");
+                int magnitude = Math.min(Math.max(val - 20, 0), TERM_WIDTH -30);
+                String ansiColor = "\u001B[3" + ((magnitude % 7) + 1) + "m"; // Red -> Cyan
+                int spaces = ((ch+1) / 10) > 0 ? 0 : 1; // for padding digits
+                System.out.println(" ".repeat(spaces) + (ch + 1) + " " + ansiColor + "#".repeat(magnitude) + " " + toMusicalNote(channels.get(ch)) + "\u001B[0m");
+            }
+
+            // Sleep for tickLength to set a decent refresh rate
+            //noinspection BusyWait
+            Thread.sleep(tickLength);
+        }
     }
 
     /**
@@ -157,6 +189,7 @@ public final class MidiCliPlayer {
      */
     private Void scheduleEventsAndWait(Midi midi, Map<Integer, Integer> channels, TotalTime timeRemaining, int tickLength) throws InterruptedException {
         // Schedule the events in absolute time
+        // each batch is scheduled for the same time
         var eventBatches = midi.allEventsInAbsoluteTime();
         Timer timer = new Timer();
         long beforeSequencing = System.nanoTime();
@@ -241,9 +274,11 @@ public final class MidiCliPlayer {
         if (note == 0) return "";
         return NOTES[note % NOTES.length];
     }
+
     private static void printOptions() {
         String msg = "\nCOOL Midi\n\nUsage: cmidi [MIDI Files]\n\n";
         msg += "Options:\n  -V   Print version information";
+        msg += "\n  -A   Use the alternative tracker-like UI";
         System.out.println(msg);
     }
 

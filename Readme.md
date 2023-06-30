@@ -24,11 +24,12 @@ Build
 # requires Java 17+
 
 # Jar
-jar cfmv coolmidi.jar META-INF/MANIFEST.MF io.feydor.MidiCliPlayer.class io.feydor.midi
+cd out/production/cool-midi-proto
+jar cMf coolmidi.jar *
 java -jar coolmidi.jar <TEST_MIDI>
 
 # To native executable (in x64 Native Tools CMD Prompt for VS)
-# NOTE: This won't actually run without JAVA_HOME because of some wierd reflection going on in the Java io.feydor.midi Receiver ???
+# NOTE: This won't actually run without JAVA_HOME because of some wierd reflection going on in the Java Receiver ???
 set JAVA_HOME="/path/to/GRAALVM/"
 
 cd out/production/cool-midi-proto

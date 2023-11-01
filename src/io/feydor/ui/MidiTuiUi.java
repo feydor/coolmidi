@@ -1,0 +1,85 @@
+package io.feydor.ui;
+
+import io.feydor.midi.Midi;
+
+import java.util.Map;
+import java.util.concurrent.Future;
+
+public class MidiTuiUi implements MidiUi {
+    private final static String[] NOTES = new String[]{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+
+    @Override
+    public void block(Midi midi, Future<Void> playbackThread, Map<Integer, Integer> channels) throws Exception {
+        // Display the UI while the playing thread sleeps
+        var timeRemaining = new TotalTime(0);
+        int tickLength = 100; // The length of each tick in the UI thread (this thread)
+        nowPlayingUi(midi, channels, timeRemaining, tickLength, playbackThread);
+    }
+
+    private void nowPlayingUi(Midi midi, Map<Integer, Integer> channels, TotalTime timeRemaining, int tickLength, Future<Void> schedulerThread) throws InterruptedException {
+        int filenamePos = 0;
+        long ticks = 0;
+        int TERM_WIDTH = 100;
+        System.out.print("\033[H\033[2J");
+        System.out.flush();
+        while (!schedulerThread.isDone()) {
+            System.out.print("\033[" + 1 + ";" + 1 + "H");
+            System.out.println("CoolMidi v0.1.0 " + "/".repeat(TERM_WIDTH - 16));
+            System.out.print("\033[" + 2 + ";" + 1 + "H");
+            System.out.print(" ".repeat(TERM_WIDTH));
+            System.out.print("\r");
+
+            // Scrolling filename with wrap around
+            int start = filenamePos;
+            int end = start + midi.filename.length();
+            int diff = TERM_WIDTH - end;
+            String overflowChars;
+            int pivot;
+            if (diff <= -1* midi.filename.length()) {
+                filenamePos = 0;
+                start = 0;
+                System.out.print(" ".repeat(start) + midi.filename);
+            } else if (diff < 0) {
+                // print overflow characters from filename (starting at the end)
+                pivot = Math.abs(diff);
+                overflowChars = midi.filename.substring(midi.filename.length()-1-pivot);
+                System.out.print(overflowChars);
+                System.out.print(" ".repeat(TERM_WIDTH - overflowChars.length() - (midi.filename.length()-overflowChars.length())));
+                System.out.print(midi.filename.substring(0, midi.filename.length()-pivot-1));
+            } else {
+                System.out.print(" ".repeat(start) + midi.filename);
+            }
+
+            filenamePos = Math.min(filenamePos+1, TERM_WIDTH + midi.filename.length());
+
+            System.out.print("\033[" + 3 + ";" + 1 + "H");
+            System.out.println("time: " + ticks++ + "/" + timeRemaining);
+
+            System.out.print("\033[" + 4 + ";" + 1 + "H");
+            for (var entry : channels.entrySet()) {
+                int ch = entry.getKey();
+                int val = entry.getValue();
+                System.out.print("\r");
+                System.out.print(" ".repeat(TERM_WIDTH));
+                System.out.print("\r");
+                int magnitude = Math.min(Math.max(val - 20, 0), TERM_WIDTH -30);
+                String ansiColor = "\u001B[3" + ((magnitude % 7) + 1) + "m"; // Red -> Cyan
+                int spaces = ((ch+1) / 10) > 0 ? 0 : 1; // for padding digits
+                System.out.println(" ".repeat(spaces) + (ch + 1) + " " + ansiColor + "#".repeat(magnitude) + " " + toMusicalNote(channels.get(ch)) + "\u001B[0m");
+            }
+
+            // Sleep for tickLength to set a decent refresh rate
+            //noinspection BusyWait
+            Thread.sleep(tickLength);
+        }
+    }
+
+    /** Maps a MIDI note value (0-127) to a musical note string */
+    private String toMusicalNote(int note) {
+        if (note < 0 || note > 128) {
+            throw new IllegalArgumentException("A MIDI note value must be between the range [0, 127]: " + note);
+        }
+        if (note == 0) return "";
+        return NOTES[note % NOTES.length];
+    }
+}

@@ -32,6 +32,7 @@ public final class MidiCliPlayer {
         }
 
         var uiOption = MidiCliOption.NO_UI;
+        var verbose = false;
         for (var arg : args) {
             switch (arg) {
                 case "-V", "--version" -> {
@@ -47,20 +48,21 @@ public final class MidiCliPlayer {
                 case "-A" -> uiOption = MidiCliOption.TRACKER_UI;
                 case "-B" -> uiOption = MidiCliOption.TUI_UI;
                 case "-C" -> uiOption = MidiCliOption.NO_UI;
+                case "-v", "--verbose" -> verbose = true;
             }
         }
 
-        MidiCliPlayer player = new MidiCliPlayer(args, uiOption);
+        MidiCliPlayer player = new MidiCliPlayer(args, uiOption, verbose);
         player.playAndBlock();
     }
 
-    public MidiCliPlayer(String[] filenames, MidiCliOption uiOption) throws MidiUnavailableException {
+    public MidiCliPlayer(String[] filenames, MidiCliOption uiOption, boolean verbose) throws MidiUnavailableException {
         // Filter out the invalid Midi files
         List<Midi> playlist = Stream.of(filenames)
                 .filter(arg -> !arg.isBlank() && arg.charAt(0) != '-')
                 .map(filename -> {
                     try {
-                        return new Midi(filename.replaceAll("/.//", ""));
+                        return new Midi(filename.replaceAll("/.//", ""), verbose);
                     } catch (IOException e) {
                         System.out.printf("The file failed to load: %s\n%s. Skipping...", filename, e.getMessage());
                         return null;
@@ -68,9 +70,11 @@ public final class MidiCliPlayer {
                 }).filter(Objects::nonNull).toList();
 
         // Get the default MIDI device and its receiver
-        var devices = MidiSystem.getMidiDeviceInfo();
-        System.out.println("# of devices: " + devices.length);
-        System.out.println("Available devices: " + Arrays.toString(devices));
+        if (verbose) {
+            var devices = MidiSystem.getMidiDeviceInfo();
+            System.out.println("# of devices: " + devices.length);
+            System.out.println("Available devices: " + Arrays.toString(devices));
+        }
         Receiver receiver = MidiSystem.getReceiver();
         MidiUi ui = switch (uiOption) {
             case TUI_UI -> new MidiTuiUi();
@@ -78,7 +82,7 @@ public final class MidiCliPlayer {
             case NO_UI -> null;
         };
 
-        this.midiScheduler = new MidiScheduler(ui, playlist, receiver);
+        this.midiScheduler = new MidiScheduler(ui, playlist, receiver, verbose);
     }
 
     public void playAndBlock() throws Exception {
@@ -87,11 +91,13 @@ public final class MidiCliPlayer {
 
     private static void printOptions() {
         String msg = "\nCOOL Midi\n\nUsage: cmidi [MIDI Files]\n\n";
-        msg += "Options:\n  -V,--version   Print version information";
-        msg += "\n  -H,--help      Print this message";
+        msg += "Options:\n";
         msg += "\n  -A   Use the TUI-like UI";
         msg += "\n  -B   Use the alternative tracker-like UI";
         msg += "\n  -C   Use no UI (Default)";
+        msg += "\n  -V,--version   Print version information";
+        msg += "\n  -H,--help      Print this message";
+        msg += "\n  -v,--verbose   Print extra logs";
         System.out.println(msg);
     }
 

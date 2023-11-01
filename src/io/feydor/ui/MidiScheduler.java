@@ -16,11 +16,13 @@ public class MidiScheduler {
     private final MidiUi ui;
     private final List<Midi> playlist;
     private final Receiver receiver;
+    private final boolean verbose;
 
-    public MidiScheduler(MidiUi ui, List<Midi> playlist, Receiver receiver) {
+    public MidiScheduler(MidiUi ui, List<Midi> playlist, Receiver receiver, boolean verbose) {
         this.ui = ui;
         this.playlist = playlist;
         this.receiver = receiver;
+        this.verbose = verbose;
     }
 
     /** Play all of the loaded files */
@@ -39,7 +41,8 @@ public class MidiScheduler {
                     channels.put(i, 0);
                 }
             }
-            System.out.println("# of channels used: " + channels.size());
+            if (verbose)
+                System.out.println("# of channels used: " + channels.size());
 
             // Start playback in a new thread which will update the channel map and the time remaining
             // and then sleep until the last event in the file

@@ -3,15 +3,17 @@ package io.feydor;
 import io.feydor.midi.Midi;
 import io.feydor.ui.*;
 
-import javax.sound.midi.*;
+import javax.sound.midi.MidiSystem;
+import javax.sound.midi.MidiUnavailableException;
+import java.io.File;
 import java.io.IOException;
 import java.util.*;
-import java.util.stream.Stream;
 
 enum MidiCliOption {
     NO_UI,
     TRACKER_UI,
-    TUI_UI
+    TUI_UI,
+    STATUS_LINE_UI
 }
 
 /**
@@ -30,7 +32,8 @@ public final class MidiCliPlayer {
             return;
         }
 
-        var uiOption = MidiCliOption.NO_UI;
+        List<File> files = new ArrayList<>();
+        var uiOption = MidiCliOption.STATUS_LINE_UI;
         boolean verbose = false, loop = false;
         for (var arg : args) {
             switch (arg) {
@@ -44,30 +47,41 @@ public final class MidiCliPlayer {
                     System.exit(1);
                     return;
                 }
-                case "-A" -> uiOption = MidiCliOption.TRACKER_UI;
-                case "-B" -> uiOption = MidiCliOption.TUI_UI;
-                case "-C" -> uiOption = MidiCliOption.NO_UI;
+                case "-A" -> uiOption = MidiCliOption.STATUS_LINE_UI;
+                case "-B" -> uiOption = MidiCliOption.TRACKER_UI;
+                case "-C" -> uiOption = MidiCliOption.TUI_UI;
+                case "-D" -> uiOption = MidiCliOption.NO_UI;
                 case "-v", "--verbose" -> verbose = true;
                 case "-l", "--loop" -> loop = true;
+                default -> files.addAll(parseFiles(arg));
             }
         }
 
-        MidiCliPlayer player = new MidiCliPlayer(args, uiOption, verbose);
+        MidiCliPlayer player = new MidiCliPlayer(files, uiOption, verbose);
         player.playAndBlock(loop);
     }
 
-    public MidiCliPlayer(String[] filenames, MidiCliOption uiOption, boolean verbose) throws MidiUnavailableException {
+    public MidiCliPlayer(List<File> files, MidiCliOption uiOption, boolean verbose) throws MidiUnavailableException {
         // Filter out the invalid Midi files
-        List<Midi> playlist = Stream.of(filenames)
-                .filter(arg -> !arg.isBlank() && arg.charAt(0) != '-')
-                .map(filename -> {
+        List<Midi> playlist = files.stream().map(file -> {
                     try {
-                        return new Midi(filename.replaceAll("/.//", ""), verbose);
+                        return new Midi(file.getAbsolutePath(), verbose);
                     } catch (IOException e) {
-                        System.out.printf("The file failed to load: %s\n%s. Skipping...", filename, e.getMessage());
+                        System.err.printf("The file failed to load: %s\n%s. Skipping...\n", file.getAbsolutePath(), e.getMessage());
+                        return null;
+                    } catch (RuntimeException e) {
+                        System.err.printf("The MIDI file failed to parse: %s\n%s. Skipping...\n", file.getAbsolutePath(), e.getMessage());
                         return null;
                     }
-                }).filter(Objects::nonNull).toList();
+                })
+                .filter(Objects::nonNull)
+                .toList();
+
+        if (!playlist.isEmpty()) {
+            System.out.printf("Parsed %d MIDI files\n", playlist.size());
+            playlist = new ArrayList<>(playlist);
+            Collections.shuffle(playlist);
+        }
 
         // Get the default MIDI device and its receiver
         if (verbose) {
@@ -75,26 +89,43 @@ public final class MidiCliPlayer {
             System.out.println("# of devices: " + devices.length);
             System.out.println("Available devices: " + Arrays.toString(devices));
         }
-        Receiver receiver = MidiSystem.getReceiver();
+
         MidiUi ui = switch (uiOption) {
             case TUI_UI -> new MidiTuiUi();
             case TRACKER_UI -> new MidiTrackerUi();
-            case NO_UI -> new MidiStatusLineUi();
+            case STATUS_LINE_UI -> new MidiStatusLineUi();
+            case NO_UI -> null;
         };
 
-        this.midiScheduler = new MidiScheduler(ui, playlist, receiver, verbose);
+        this.midiScheduler = new MidiScheduler(ui, playlist, MidiSystem.getReceiver(), verbose);
     }
 
     public void playAndBlock(boolean loop) throws Exception {
         midiScheduler.scheduleEventsAndWait(loop);
     }
 
+    private static List<File> parseFiles(String filename) {
+        if (!filename.isBlank() && filename.charAt(0) != '-') {
+            File file = new File(filename);
+            if (file.isDirectory()) {
+                System.out.println("Found dir: " + file.getAbsolutePath());
+                File[] dirFiles = file.listFiles((dir, name) -> name.toLowerCase().matches("^.*\\.(midi|mid)$"));
+                if (dirFiles != null)
+                    return List.of(dirFiles);
+            } else {
+                return List.of(file);
+            }
+        }
+        return List.of();
+    }
+
     private static void printOptions() {
         String msg = "\nCOOL Midi\n\nUsage: cmidi [MIDI Files]\n\n";
         msg += "Options:\n";
-        msg += "\n  -A   Use the TUI-like UI";
+        msg += "\n  -A   Use the status line UI (Default)";
         msg += "\n  -B   Use the alternative tracker-like UI";
-        msg += "\n  -C   Use no UI (Default)";
+        msg += "\n  -C   Use the TUI-like UI";
+        msg += "\n  -D   Use no UI";
         msg += "\n  -V,--version   Print version information";
         msg += "\n  -H,--help      Print this message";
         msg += "\n  -v,--verbose   Print extra logs";
@@ -102,7 +133,6 @@ public final class MidiCliPlayer {
     }
 
     private static void printVersion() {
-        String msg = "COOL Midi 0.1.0\nCopyright (C) 2023 feydor\n";
-        System.out.println(msg);
+        System.out.println("COOL Midi 0.1.0\nCopyright (C) 2023 feydor\n");
     }
 }

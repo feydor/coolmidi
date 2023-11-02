@@ -3,7 +3,7 @@ CoolMidi
 A MIDI parser, sequencer, and CLI player with the following features:
 * Support for format 0 & 1 MIDI files including the following standards: GM, XG, GS
 * Plays back all provided MIDI files in the given order (playlist support)
-* CLI UI to display the last note on each of the maximum 16 MIDI channels
+* A few different CLI UI options
 * MIDI files with [running status](http://midi.teragonaudio.com/tech/midispec/run.htm) work fine
 * ~~The name sounds like chlamydia~~
 
@@ -14,7 +14,7 @@ And also what isn't supported (yet):
 
 UI Screenshot
 -------------
-![Screenshot](/screenshot-v0.1.0-alpha.png)
+![Screenshot](/Screenshot%202023-11-02%20010229.png)
 
 Build
 -----

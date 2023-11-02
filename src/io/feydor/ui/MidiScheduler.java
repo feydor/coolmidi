@@ -1,14 +1,10 @@
 package io.feydor.ui;
 
-import io.feydor.midi.ByteFns;
-import io.feydor.midi.Midi;
-import io.feydor.midi.MidiEventSubType;
+import io.feydor.midi.*;
 
 import javax.sound.midi.*;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 
 public class MidiScheduler {
 
@@ -26,39 +22,37 @@ public class MidiScheduler {
     }
 
     /** Play all of the loaded files */
-    public void scheduleEventsAndWait() throws Exception {
-        List<String> filenames = playlist.stream().map(m -> m.filename).toList();
-        System.out.println("Playing the following files: " + filenames);
-
+    public void scheduleEventsAndWait(boolean loop) throws Exception {
         // For each MIDI file,
         // i. Extract the # of channels used into a map of channel# and its current value
         // ii. Sequence and play the file in a new thread, passing in the channels map to keep track of note values
         // iii. In the thread, display the UI
-        for (Midi midi : playlist) {
-            var channels = new HashMap<Integer, Integer>();
-            for (int i = 0; i < midi.channelsUsed.length; ++i) {
-                if (midi.channelsUsed[i]) {
-                    channels.put(i, 0);
+        do {
+            for (Midi midi : playlist) {
+                System.out.println("Playing: " + midi.filename);
+                var channels = new HashMap<Integer, Integer>();
+                for (int i = 0; i < midi.channelsUsed.length; ++i) {
+                    if (midi.channelsUsed[i]) {
+                        channels.put(i, 0);
+                    }
+                }
+                if (verbose)
+                    System.out.println("# of channels used: " + channels.size());
+
+                // Start playback in a new thread which will update the channel map and the time remaining
+                // and then sleep until the last event in the file
+                var timeRemaining = new TotalTime(0);
+                int tickLength = 100; // The length of each tick in the UI thread (this thread)
+                Future<Void> schedulerThread = executor.submit(() -> scheduleEventsAndWait(midi, channels, timeRemaining, tickLength));
+
+                // Display the UI while the playing thread sleeps
+                if (ui != null) {
+                    ui.block(midi, schedulerThread, channels);
+                } else {
+                    while (!schedulerThread.isDone());
                 }
             }
-            if (verbose)
-                System.out.println("# of channels used: " + channels.size());
-
-            // Start playback in a new thread which will update the channel map and the time remaining
-            // and then sleep until the last event in the file
-            var timeRemaining = new TotalTime(0);
-            int tickLength = 100; // The length of each tick in the UI thread (this thread)
-            Future<Void> schedulerThread = executor.submit(() -> scheduleEventsAndWait(midi, channels, timeRemaining, tickLength));
-
-            // Display the UI while the playing thread sleeps
-            if (ui != null) {
-                ui.block(midi, schedulerThread, channels);
-            } else {
-                while (!schedulerThread.isDone());
-            }
-
-            System.out.println("Finished playing: " + midi.filename);
-        }
+        } while (loop);
 
         executor.shutdown();
         System.out.println("END");

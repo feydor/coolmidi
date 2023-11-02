@@ -1,19 +1,18 @@
 package io.feydor;
 
 import io.feydor.midi.Midi;
-import io.feydor.ui.MidiScheduler;
-import io.feydor.ui.MidiTrackerUi;
-import io.feydor.ui.MidiTuiUi;
-import io.feydor.ui.MidiUi;
+import io.feydor.ui.*;
 
-import javax.sound.midi.MidiSystem;
-import javax.sound.midi.MidiUnavailableException;
-import javax.sound.midi.Receiver;
+import javax.sound.midi.*;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.stream.Stream;
+
+enum MidiCliOption {
+    NO_UI,
+    TRACKER_UI,
+    TUI_UI
+}
 
 /**
  * Plays a list of MIDI files using the OS's default MIDI synthesizer and displays a CLI UI with the current notes
@@ -32,7 +31,7 @@ public final class MidiCliPlayer {
         }
 
         var uiOption = MidiCliOption.NO_UI;
-        var verbose = false;
+        boolean verbose = false, loop = false;
         for (var arg : args) {
             switch (arg) {
                 case "-V", "--version" -> {
@@ -49,11 +48,12 @@ public final class MidiCliPlayer {
                 case "-B" -> uiOption = MidiCliOption.TUI_UI;
                 case "-C" -> uiOption = MidiCliOption.NO_UI;
                 case "-v", "--verbose" -> verbose = true;
+                case "-l", "--loop" -> loop = true;
             }
         }
 
         MidiCliPlayer player = new MidiCliPlayer(args, uiOption, verbose);
-        player.playAndBlock();
+        player.playAndBlock(loop);
     }
 
     public MidiCliPlayer(String[] filenames, MidiCliOption uiOption, boolean verbose) throws MidiUnavailableException {
@@ -79,14 +79,14 @@ public final class MidiCliPlayer {
         MidiUi ui = switch (uiOption) {
             case TUI_UI -> new MidiTuiUi();
             case TRACKER_UI -> new MidiTrackerUi();
-            case NO_UI -> null;
+            case NO_UI -> new MidiStatusLineUi();
         };
 
         this.midiScheduler = new MidiScheduler(ui, playlist, receiver, verbose);
     }
 
-    public void playAndBlock() throws Exception {
-        midiScheduler.scheduleEventsAndWait();
+    public void playAndBlock(boolean loop) throws Exception {
+        midiScheduler.scheduleEventsAndWait(loop);
     }
 
     private static void printOptions() {

@@ -1,7 +1,5 @@
 CoolMidi
 ========
-Introduction
-------------
 A MIDI parser, sequencer, and CLI player with the following features:
 * Support for format 0 & 1 MIDI files including the following standards: GM, XG, GS
 * Plays back all provided MIDI files in the given order (playlist support)

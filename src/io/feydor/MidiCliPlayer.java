@@ -13,6 +13,7 @@ enum MidiCliOption {
     NO_UI,
     TRACKER_UI,
     TUI_UI,
+    CHANNEL_UI,
     STATUS_LINE_UI
 }
 
@@ -33,7 +34,7 @@ public final class MidiCliPlayer {
         }
 
         List<File> files = new ArrayList<>();
-        var uiOption = MidiCliOption.STATUS_LINE_UI;
+        var uiOption = MidiCliOption.CHANNEL_UI;
         boolean verbose = false, loop = false;
         for (var arg : args) {
             switch (arg) {
@@ -94,6 +95,7 @@ public final class MidiCliPlayer {
             case TUI_UI -> new MidiTuiUi();
             case TRACKER_UI -> new MidiTrackerUi();
             case STATUS_LINE_UI -> new MidiStatusLineUi();
+            case CHANNEL_UI -> new MidiChannelUi();
             case NO_UI -> null;
         };
 

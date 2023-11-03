@@ -1,6 +1,7 @@
 package io.feydor.ui;
 
 import io.feydor.midi.Midi;
+import io.feydor.midi.MidiChannel;
 
 import java.util.Map;
 import java.util.concurrent.Future;
@@ -8,7 +9,7 @@ import java.util.concurrent.Future;
 public class MidiTrackerUi implements MidiUi {
 
     @Override
-    public void block(Midi midi, Future<Void> playbackThread, Map<Integer, Integer> channels) throws Exception {
+    public void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime timeUntilLastEvent) throws Exception {
         double t = 0;
         int maxMsgLen = 6;
         var eventBatches = midi.allEventsInAbsoluteTime();

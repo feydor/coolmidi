@@ -1,6 +1,7 @@
 package io.feydor.ui;
 
 import io.feydor.midi.Midi;
+import io.feydor.midi.MidiChannel;
 
 import java.util.Map;
 import java.util.concurrent.Future;
@@ -9,16 +10,15 @@ public class MidiTuiUi implements MidiUi {
     private final static String[] NOTES = new String[]{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 
     @Override
-    public void block(Midi midi, Future<Void> playbackThread, Map<Integer, Integer> channels) throws Exception {
+    public void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime timeUntilLastEvent) throws Exception {
         // Display the UI while the playing thread sleeps
-        var timeRemaining = new TotalTime(0);
-        int tickLength = 100; // The length of each tick in the UI thread (this thread)
-        nowPlayingUi(midi, channels, timeRemaining, tickLength, playbackThread);
+        nowPlayingUi(midi, channels, timeUntilLastEvent, playbackThread);
     }
 
-    private void nowPlayingUi(Midi midi, Map<Integer, Integer> channels, TotalTime timeRemaining, int tickLength, Future<Void> schedulerThread) throws InterruptedException {
+    private void nowPlayingUi(Midi midi, MidiChannel[] channels, TotalTime timeRemaining, Future<Void> schedulerThread) throws InterruptedException {
         int filenamePos = 0;
         long ticks = 0;
+        int tickLength = 1000; // 1 sec
         int TERM_WIDTH = 100;
         System.out.print("\033[H\033[2J");
         System.out.flush();
@@ -53,24 +53,26 @@ public class MidiTuiUi implements MidiUi {
             filenamePos = Math.min(filenamePos+1, TERM_WIDTH + midi.filename.length());
 
             System.out.print("\033[" + 3 + ";" + 1 + "H");
-            System.out.println("time: " + ticks++ + "/" + timeRemaining);
+            System.out.println("time: " + ticks / 1000 + "/" + timeRemaining.asSeconds());
 
             System.out.print("\033[" + 4 + ";" + 1 + "H");
-            for (var entry : channels.entrySet()) {
-                int ch = entry.getKey();
-                int val = entry.getValue();
+            for (MidiChannel channel : channels) {
+                int ch = channel.channel;
+                byte note = channel.note;
+                int val = channel.getVolume();
                 System.out.print("\r");
                 System.out.print(" ".repeat(TERM_WIDTH));
                 System.out.print("\r");
                 int magnitude = Math.min(Math.max(val - 20, 0), TERM_WIDTH -30);
                 String ansiColor = "\u001B[3" + ((magnitude % 7) + 1) + "m"; // Red -> Cyan
                 int spaces = ((ch+1) / 10) > 0 ? 0 : 1; // for padding digits
-                System.out.println(" ".repeat(spaces) + (ch + 1) + " " + ansiColor + "#".repeat(magnitude) + " " + toMusicalNote(channels.get(ch)) + "\u001B[0m");
+                System.out.println(" ".repeat(spaces) + (ch + 1) + " " + ansiColor + "#".repeat(magnitude) + " " + toMusicalNote(note) + "\u001B[0m");
             }
 
             // Sleep for tickLength to set a decent refresh rate
             //noinspection BusyWait
             Thread.sleep(tickLength);
+            ticks += tickLength;
         }
     }
 

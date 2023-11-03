@@ -1,6 +1,7 @@
 package io.feydor.ui;
 
 import io.feydor.midi.*;
+import io.feydor.midi.MidiChannel;
 
 import javax.sound.midi.*;
 import java.util.*;
@@ -30,24 +31,23 @@ public class MidiScheduler {
         do {
             for (Midi midi : playlist) {
                 System.out.println("Playing: " + midi.filename);
-                var channels = new HashMap<Integer, Integer>();
-                for (int i = 0; i < midi.channelsUsed.length; ++i) {
-                    if (midi.channelsUsed[i]) {
-                        channels.put(i, 0);
-                    }
+                MidiChannel[] channels = new MidiChannel[16];
+                for (int i=0; i<16; ++i) {
+                    channels[i] = new MidiChannel(i+1, midi.channelsUsed[i]);
                 }
+
                 if (verbose)
-                    System.out.println("# of channels used: " + channels.size());
+                    System.out.println("# of channels used: " + channels.length);
 
                 // Start playback in a new thread which will update the channel map and the time remaining
                 // and then sleep until the last event in the file
-                var timeRemaining = new TotalTime(0);
-                int tickLength = 100; // The length of each tick in the UI thread (this thread)
-                Future<Void> schedulerThread = executor.submit(() -> scheduleEventsAndWait(midi, channels, timeRemaining, tickLength));
+                var eventBatches = midi.allEventsInAbsoluteTime();
+                TotalTime timeUntilLastEvent = new TotalTime(eventBatches.get(eventBatches.size()-1).get(0).absoluteTime);
+                Future<Void> schedulerThread = executor.submit(() -> scheduleEventsAndWait(midi, channels, timeUntilLastEvent));
 
                 // Display the UI while the playing thread sleeps
                 if (ui != null) {
-                    ui.block(midi, schedulerThread, channels);
+                    ui.block(midi, schedulerThread, channels, timeUntilLastEvent);
                 } else {
                     while (!schedulerThread.isDone());
                 }
@@ -64,11 +64,10 @@ public class MidiScheduler {
      * Should be run in a new thread.
      * @param midi The file to playback
      * @param channels A map of channels used to their values. Set by this method.
-     * @param timeRemaining The file's remaining time. Set by this method.
-     * @param tickLength The length of each tick in the calling thread. Used to set the timeRemaining.
+     * @param timeUntilLastEvent The file's remaining time. The time of the last event in absolute time.
      * @throws InterruptedException When the thread is interrupted somehow
      */
-    private Void scheduleEventsAndWait(Midi midi, Map<Integer, Integer> channels, TotalTime timeRemaining, int tickLength) throws InterruptedException {
+    private Void scheduleEventsAndWait(Midi midi, MidiChannel[] channels, TotalTime timeUntilLastEvent) throws InterruptedException {
         // Schedule the events in absolute time
         // each batch is scheduled for the same time
         var eventBatches = midi.allEventsInAbsoluteTime();
@@ -92,13 +91,9 @@ public class MidiScheduler {
             }, absoluteTimeInMs);
         }
 
-        // Calculate how long the thread has to sleep until the last event is played
-        // Making sure to set that time in timeRemaining
+        // Sleep until the last event is played (accounting for how long the above sequencing loop took)
         long totalSequencingTimeMs = (System.nanoTime() - beforeSequencing) / 1_000_000;
-        double lastEventTime = eventBatches.get(eventBatches.size()-1).get(0).absoluteTime;
-        double timeUntilLastEvent = lastEventTime - totalSequencingTimeMs;
-        timeRemaining.t = (int)(timeUntilLastEvent / tickLength);
-        Thread.sleep(Math.round(timeUntilLastEvent));
+        Thread.sleep(Math.round(timeUntilLastEvent.ms() - totalSequencingTimeMs));
         return null;
     }
 
@@ -109,20 +104,12 @@ public class MidiScheduler {
      * @return The formatted message ready to be sent
      * @throws InvalidMidiDataException When an invalid MIDI event is encountered
      */
-    private MidiMessage makeMidiMessage(Midi.MidiChunk.Event event, Map<Integer, Integer> channels) throws InvalidMidiDataException {
+    private MidiMessage makeMidiMessage(Midi.MidiChunk.Event event, MidiChannel[] channels) throws InvalidMidiDataException {
         return switch (event.type) {
             case MIDI -> {
-                ShortMessage msg = new ShortMessage();
                 var parsed = event.parseAsChannelMidiEvent();
-                if (event.subType == MidiEventSubType.NOTE_ON || event.subType == MidiEventSubType.PITCH_BEND ||
-                        event.subType == MidiEventSubType.POLYPHONIC_PRESSURE) {
-                    channels.put(parsed.channel(), parsed.data1());
-                } else if (event.subType == MidiEventSubType.NOTE_OFF) {
-                    channels.put(parsed.channel(), 0);
-                }
-
-                msg.setMessage(parsed.cmd(), parsed.channel(), parsed.data1(), parsed.data2());
-                yield msg;
+                updateChannels(event, parsed, channels);
+                yield new ShortMessage(parsed.cmd(), parsed.channel(), parsed.data1(), parsed.data2());
             }
             case META -> {
                 var parsed = event.parseAsMetaEvent();
@@ -133,11 +120,34 @@ public class MidiScheduler {
                 int status = event.type.id;
                 byte[] data = ByteFns.fromHex(event.message.substring(2));
                 int len = data.length;
-                msg.setMessage(status, data, len);
-                yield msg;
+                yield new SysexMessage(status, data, len);
             }
             case UNKNOWN -> throw new RuntimeException("Encountered a completely unknown event: " + event);
         };
+    }
+
+    private void updateChannels(Midi.MidiChunk.Event event, Midi.MidiChunk.ChannelMidiEventParseResult parsed, MidiChannel[] channels) {
+        var channel = channels[parsed.channel()];
+        switch (event.subType) {
+            case NOTE_ON -> {
+                channel.setNoteOn(true);
+                channel.setNote((byte) parsed.data1());
+                channel.setNoteVelocity((byte) parsed.data2());
+            }
+            case NOTE_OFF -> {
+                channel.setNoteOn(false);
+                channel.setNote((byte) 0);
+                channel.setNoteVelocity((byte) 0);
+            }
+            case POLYPHONIC_PRESSURE -> channel.setPolyphonicPressure((byte) parsed.data1(), (byte) parsed.data2());
+            case PITCH_BEND -> {
+                int pitch = (parsed.data2() << 7) | parsed.data1();
+                channel.setPitchBend(pitch);
+            }
+            case PROGRAM_CHANGE -> channel.setProgram((byte) parsed.data1());
+            case CHANNEL_PRESSURE -> channel.setPressure((byte) parsed.data1());
+            case CONTROLLER -> channel.setController((byte) parsed.data1(), (byte) parsed.data2());
+        }
     }
 
 }

@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 public class Midi {
     public MidiChunk.Header header;
     public List<MidiChunk.Track> tracks = new ArrayList<>();
-    public boolean[] channelsUsed = new boolean[16];
+    public boolean[] channelsUsed = new boolean[16]; // channels 0-15 -> 1-16
     public String filename;
     private static final String END_OF_TRACK = "FF2f00";
     private final boolean verbose;

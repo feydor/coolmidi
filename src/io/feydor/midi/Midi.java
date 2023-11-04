@@ -37,15 +37,15 @@ public class Midi {
      * @throws MidiParseException When the file is unparsable
      */
     public Midi(String filename, boolean verbose) throws IOException {
-        parseMidiFile(filename);
         this.filename = filename;
         this.verbose = verbose;
+        parseMidiFile(filename);
     }
 
     public Midi(String filename) throws IOException {
-        parseMidiFile(filename);
         this.filename = filename;
         this.verbose = true;
+        parseMidiFile(filename);
     }
 
     private void parseMidiFile(String filename) throws IOException {
@@ -159,7 +159,7 @@ public class Midi {
 
             // Format: <MTrk chunk> = <delta-time:VarLen(1-4B)><event:(2+ B)>
             // Note: Delta-time is associated with an event
-            VarLenQuant dt = VarLenQuant.from(file);
+            VarLenQuant dt = VarLenQuant.readBytes(file);
             bytesRead += dt.nbytes;
 
             file.mark(len); // mark position to return to when creating the message
@@ -252,17 +252,17 @@ public class Midi {
                         }
                         // Text events, varlen
                         case 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x7F -> {
-                            var length = VarLenQuant.from(file);
+                            var length = VarLenQuant.readBytes(file);
                             file.skipNBytes(length.value);
-                            dataStart = 1 + length.nbytes;
-                            dataLen = 1 + length.value;
-                            yield length.value + length.nbytes;
+                            dataStart = 2 + length.nbytes; // exclude the varlen bytes from the actual data bytes
+                            dataLen = length.value;
+                            yield length.value + length.nbytes; // rest of message len (varlen + data bytes)
                         }
                         default -> throw new MidiParseException("Unknown Meta-Event encountered! status=" + status);
                     };
                 }
                 case MIDI -> {
-                    // io.feydor.Midi events: <status:1B> <data:1 | 2 B>
+                    // Midi events: <status:1B> <data:1 | 2 B>
                     // Special case: If the status byte is less than 0x80 (120),
                     // then running status in effect which means that
                     // this byte is actually the first data byte (the status is carried over from the previous event)
@@ -309,8 +309,10 @@ public class Midi {
                 case SYSEX -> {
                     // SysEx event:
                     // Complete message: <F0> <len:VarLen> <message:len B>
-                    var length = VarLenQuant.from(file);
+                    var length = VarLenQuant.readBytes(file);
                     file.skipNBytes(length.value);
+                    dataStart = 1 + length.nbytes;
+                    dataLen = length.value;
                     messageLen += length.value + length.nbytes;
                 }
                 case UNKNOWN -> {
@@ -372,36 +374,35 @@ public class Midi {
      * @return Every event sorted by absolute time in milliseconds
      */
     public List<List<MidiChunk.Event>> allEventsInAbsoluteTime() {
-        List<MidiChunk.Event> eventsSortedByAbsoluteTime = new ArrayList<>();
-        for (var track : tracks) {
-            var trackEventsSorted = track.eventsInAbsoluteTime(header.tickdiv);
-            eventsSortedByAbsoluteTime.addAll(trackEventsSorted);
-        }
-
-        Map<Double, List<MidiChunk.Event>> eventChunks =  eventsSortedByAbsoluteTime.stream()
+        // convert track events in absolute time and keep in same internal order
+        // but group all by absolute time
+        Map<Double, List<MidiChunk.Event>> eventsGroupedByAbsoluteTime = tracks.stream()
+                .flatMap(track -> track.eventsInAbsoluteTime(header.tickdiv).stream())
+                .toList()
+                .stream()
                 .filter(event -> event.subType != MidiEventSubType.END_OF_TRACK)
                 .collect(Collectors.groupingBy(MidiChunk.Event::absoluteTime));
 
         // Make sure that META events are always sent before the MIDI ones otherwise you occasionaly get strange notes in the begining
-        // NOTE: Not my final form...
-        for (var chunk : eventChunks.entrySet()) {
-            chunk.getValue().sort(Comparator.comparingInt(e -> {
-                if (e.type == MidiEventType.META || e.type == MidiEventType.SYSEX) {
-                    return -2;
-                }
-                else if (e.subType == MidiEventSubType.NOTE_ON) {
-                    return -1;
-                }
-                else if (e.subType == MidiEventSubType.NOTE_OFF) {
-                    return 1;
-                }
-                return 0;
+        // Other events stay in the same relative position
+        for (var events : eventsGroupedByAbsoluteTime.entrySet()) {
+            events.getValue().sort(Comparator.comparingInt(e -> {
+                return e.type == MidiEventType.META || e.type == MidiEventType.SYSEX ? 0 : 1;
             }));
         }
 
-        return eventChunks.values().stream()
-                .sorted(Comparator.comparing(events -> events.get(0).absoluteTime))
-                .toList();
+        // return only the chunks of events sorted by absolute time
+        List<Map.Entry<Double, List<MidiChunk.Event>>> entryList = new ArrayList<>(eventsGroupedByAbsoluteTime.entrySet());
+        var ret =  entryList.stream().sorted(Map.Entry.comparingByKey()).map(Map.Entry::getValue).toList();
+        return ret;
+
+//        Collections.sort(sortedKeys);
+//        return eventsGroupedByAbsoluteTime.entrySet().stream()
+//                .sorted(Map.Entry.comparingByKey())
+//                .toList();
+//        return eventsGroupedByAbsoluteTime.values().stream()
+//                .sorted(Comparator.comparing(events -> events.get(0).absoluteTime))
+//                .toList();
     }
 
     /**
@@ -433,7 +434,7 @@ public class Midi {
             );
 
             /**
-             * Validate and construct a io.feydor.Midi Header
+             * Validate and construct a Midi Header
              * @param id The first four bytes of a chunk identify it. Must be "MThd".
              * @param len The number of bytes in this chunk (excludes the id bytes)
              * @param format One of the three possible io.feydor.Midi file formats
@@ -466,7 +467,7 @@ public class Midi {
                                                           .map(Map.Entry::getValue)
                                                           .findFirst();
                 if (validatedFormat.isEmpty()) {
-                    throw new MidiInvalidHeaderException("A io.feydor.Midi Header chunk must have a format of 0, 1 or 3! Given: " + format);
+                    throw new MidiInvalidHeaderException("A Midi Header chunk must have a format of 0, 1 or 3! Given: " + format);
                 }
 
                 if (validatedFormat.get() == MidiFileFormat.FORMAT_0 && ntracks != 1) {
@@ -512,11 +513,11 @@ public class Midi {
             public TimeSignature timeSignature;
 
             /**
-             * Constructs and validates a io.feydor.Midi Track
+             * Constructs and validates a Midi Track
              * @param id The first four bytes of a chunk identify it. Must be "MTrk".
              * @param len The number of bytes in this chunk (excludes the id bytes)
              * @param events Each event has a delta-time associated with it, meaning the amount of time since the previous event (in tickdiv units)
-             * @throws MidiInvalidHeaderException When attempting to construct an invalid io.feydor.Midi Track
+             * @throws MidiInvalidHeaderException When attempting to construct an invalid Midi Track
              */
             public Track(
                     int trackNum,
@@ -552,17 +553,16 @@ public class Midi {
              * @return The track's events sorted by absolute time in milliseconds
              */
             public List<Event> eventsInAbsoluteTime(int tickdiv) {
-                int currentTicks = 0;
                 double msPerTick = tempo / (double)tickdiv / 1000.0;
 
+                int t = 0;
                 List<Event> eventsSortedByAbsoluteTime = new ArrayList<>();
                 for (var event : events) {
-                    currentTicks += event.ticks;
-                    event.absoluteTime = currentTicks * msPerTick;
+                    t += event.ticks;
+                    event.absoluteTime = t * msPerTick;
                     eventsSortedByAbsoluteTime.add(event);
                 }
 
-                eventsSortedByAbsoluteTime.sort(Comparator.comparingDouble(Event::absoluteTime));
                 return eventsSortedByAbsoluteTime;
             }
 
@@ -598,7 +598,10 @@ public class Midi {
             /** If set, the message's status byte is the same the previous message and the receiver should assume it was the same as the last one. */
             public boolean useRunningStatus;
 
+            /** The byte where the data starts in the message */
             private final int dataStart;
+
+            /** The byte length of the data in the message */
             private final int dataLen;
 
             /** Is not set until the track sets it */
@@ -635,7 +638,7 @@ public class Midi {
                     throw new IllegalStateException("Attempting to parse a NON Meta event as a Meta event! event=" + this);
                 }
                 byte[] msgBytes = ByteFns.fromHex(message);
-                byte[] data = Arrays.copyOfRange(msgBytes, dataStart, msgBytes.length);
+                byte[] data = Arrays.copyOfRange(msgBytes, dataStart, msgBytes.length); // skip status + varlen
 
                 // Only End of Track events have 0 dataLen
                 if (data.length != dataLen && subType != MidiEventSubType.END_OF_TRACK) {
@@ -661,6 +664,17 @@ public class Midi {
                 return new ChannelMidiEventParseResult(cmd, channel, data1, data2);
             }
 
+            public MetaEventParseResult parseAsSysexEvent() {
+                if (type != MidiEventType.SYSEX) {
+                    throw new IllegalStateException("Attempting to parse a NON SYSEX event as a SYSEX event! " + this);
+                }
+
+                byte[] msg = ByteFns.fromHex(message);
+                byte[] data = Arrays.copyOfRange(msg, dataStart, msg.length);
+                int status = Integer.parseUnsignedInt(message.substring(0, 2), 16);
+                return new MetaEventParseResult(status, data, data.length);
+            }
+
             @Override
             public String toString() {
                 return "Event{" +
@@ -682,18 +696,16 @@ public class Midi {
     }
 
     private void logDebug(String msg) {
-        if (verbose)
-            System.out.println(msg);
+        if (verbose) System.out.println(msg);
     }
 
     private void logDebug(String format, Object ... args) {
-        if (verbose)
-            System.out.printf(format, args);
+        if (verbose) System.out.printf(format, args);
     }
 }
 
 /**
- * The 2 types of io.feydor.Midi Chunks
+ * The 2 types of MIDI Chunks
  */
 enum MidiIdentifier {
     MThd("MThd".getBytes()),

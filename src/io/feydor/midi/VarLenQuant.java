@@ -36,13 +36,13 @@ public class VarLenQuant {
     }
 
     /**
-     * Decode a VarLen from a filestream
+     * Decode a VarLen from a filestream. Modifies the current file pointer in the input stream.
      * @param file The filestream to read from
      * @return The value encoded and the # of bytes read to decode it
      * @throws IOException When the file is empty or at EoF
      * @throws InvalidVarLenParseException When more than 4 bytes are used to encode the VarLen
      */
-    static public VarLenQuant from(BufferedInputStream file) throws IOException {
+    static public VarLenQuant readBytes(BufferedInputStream file) throws IOException {
         /*
          * Varlen quantity consists of 7-bit chunks, with the MSB of each signaling the last chunk.
          *

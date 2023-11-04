@@ -55,17 +55,17 @@ class VarLenQuantTest {
          */
 
         // FF 7F -> 00 00 3F FF
-        var res = VarLenQuant.from(inputFile);
+        var res = VarLenQuant.readBytes(inputFile);
         assertEquals(0x3FFF, res.value);
         assertEquals(2, res.nbytes);
 
         // 81 80 80 00 -> 00200000
-        var res1 = VarLenQuant.from(inputFile);
+        var res1 = VarLenQuant.readBytes(inputFile);
         assertEquals(0x00200000, res1.value);
         assertEquals(4, res1.nbytes);
 
         // 84 3c -> 02 3c
-        var res2 = VarLenQuant.from(inputFile);
+        var res2 = VarLenQuant.readBytes(inputFile);
         assertEquals(0x023c, res2.value);
         assertEquals(2, res2.nbytes);
     }

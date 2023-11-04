@@ -4,6 +4,7 @@ import io.feydor.midi.*;
 import io.feydor.midi.MidiChannel;
 
 import javax.sound.midi.*;
+import javax.sound.midi.spi.MidiDeviceProvider;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -37,7 +38,7 @@ public class MidiScheduler {
                 }
 
                 if (verbose)
-                    System.out.println("# of channels used: " + channels.length);
+                    System.out.println("# of channels used: " + Arrays.stream(channels).mapToInt(ch -> ch.used ? 1 : 0).sum());
 
                 // Start playback in a new thread which will update the channel map and the time remaining
                 // and then sleep until the last event in the file
@@ -85,7 +86,7 @@ public class MidiScheduler {
                         } catch (InvalidMidiDataException e) {
                             throw new RuntimeException(e);
                         }
-                        receiver.send(msg, absoluteTimeInMs);
+                        receiver.send(msg, -1);
                     }
                 }
             }, absoluteTimeInMs);
@@ -116,11 +117,8 @@ public class MidiScheduler {
                 yield new MetaMessage(parsed.type(), parsed.data(), parsed.len());
             }
             case SYSEX -> {
-                SysexMessage msg = new SysexMessage();
-                int status = event.type.id;
-                byte[] data = ByteFns.fromHex(event.message.substring(2));
-                int len = data.length;
-                yield new SysexMessage(status, data, len);
+                var parsed = event.parseAsSysexEvent();
+                yield new SysexMessage(parsed.type(), parsed.data(), parsed.len());
             }
             case UNKNOWN -> throw new RuntimeException("Encountered a completely unknown event: " + event);
         };

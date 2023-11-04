@@ -34,7 +34,7 @@ public final class MidiCliPlayer {
         }
 
         List<File> files = new ArrayList<>();
-        var uiOption = MidiCliOption.CHANNEL_UI;
+        var uiOption = MidiCliOption.STATUS_LINE_UI;
         boolean verbose = false, loop = false;
         for (var arg : args) {
             switch (arg) {
@@ -52,6 +52,7 @@ public final class MidiCliPlayer {
                 case "-B" -> uiOption = MidiCliOption.TRACKER_UI;
                 case "-C" -> uiOption = MidiCliOption.TUI_UI;
                 case "-D" -> uiOption = MidiCliOption.NO_UI;
+                case "-E" -> uiOption = MidiCliOption.CHANNEL_UI;
                 case "-v", "--verbose" -> verbose = true;
                 case "-l", "--loop" -> loop = true;
                 default -> files.addAll(parseFiles(arg));

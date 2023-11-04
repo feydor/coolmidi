@@ -29,7 +29,7 @@ public enum MidiFileFormat {
      */
     FORMAT_2((short) 2);
 
-    final short word;
+    public final short word;
 
     MidiFileFormat(short word) {
         this.word = word;

@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
 /**
  * This class represents a parsed MIDI file.
  * <p>
- * A io.feydor.Midi file is a series of chunks:
+ * A Midi file is a series of chunks:
  * <ul>
  *     <li>
  *         MThd: a Header chunk containing the file's meta-data
@@ -32,7 +32,7 @@ public class Midi {
     private final boolean verbose;
 
     /**
-     * Parses the io.feydor.Midi file
+     * Parses the Midi file
      * @param filename The file to parse
      * @throws MidiParseException When the file is unparsable
      */
@@ -117,7 +117,7 @@ public class Midi {
     private record MidiTrackParseResult(MidiChunk.Track track, int len) {}
 
     /**
-     * Parse a io.feydor.Midi Track chunk
+     * Parse a Midi Track chunk
      * @param file the filestream to read from
      * @param id the id bytes parsed from the Track Chunk header
      * @param len the # of bytes in the Track Chunk, parsed from the header
@@ -299,7 +299,7 @@ public class Midi {
                         }
                         default: {
                             String msg = String.format("Unexpected MIDI message!\n" +
-                                            "trackNum=%d, Status=%02X, messageType=%02X, subType=%s, bytesRead=%d, messageLen=%d",
+                                            "trackNum=%d, Status=%02x, messageType=%02x, subType=%s, bytesRead=%d, messageLen=%d",
                                     trackNum, status, messageType, subType, bytesRead, messageLen);
                             logDebug(msg);
                             throw new IllegalStateException(msg);
@@ -317,7 +317,7 @@ public class Midi {
                 }
                 case UNKNOWN -> {
                     String msg = String.format("Unexpected MIDI message!\n" +
-                                    "trackNum=%d, Status=%02X, bytesRead=%d, messageLen=%d, prevEvent=%s",
+                                    "trackNum=%d, Status=%02x, bytesRead=%d, messageLen=%d, prevEvent=%s",
                             trackNum, status, bytesRead, messageLen, prevEvent);
                     throw new IllegalStateException(msg);
                 }
@@ -341,10 +341,14 @@ public class Midi {
                 message = ByteFns.toHex(new byte[]{(byte) prevStatus}) + message;
             }
 
-            var event = new MidiChunk.Event(eventType, subType, dt.value, message, useRunningStatus, dataStart, dataLen);
+            var event = new MidiChunk.Event(eventType, subType, dt.value, dt.nbytes, message, useRunningStatus, dataStart, dataLen);
             prevEvent = event;
             prevStatus = status;
             events.add(event);
+
+            if (event.subType == MidiEventSubType.NOTE_ON && "914c64".equals(event.message)) {
+                System.out.println("YEET");
+            }
         }
 
         // Last event in each chunk MUST be End of Track
@@ -383,6 +387,7 @@ public class Midi {
                 .filter(event -> event.subType != MidiEventSubType.END_OF_TRACK)
                 .collect(Collectors.groupingBy(MidiChunk.Event::absoluteTime));
 
+        // TODO: Fix me, still getting screeching
         // Make sure that META events are always sent before the MIDI ones otherwise you occasionaly get strange notes in the begining
         // Other events stay in the same relative position
         for (var events : eventsGroupedByAbsoluteTime.entrySet()) {
@@ -393,16 +398,14 @@ public class Midi {
 
         // return only the chunks of events sorted by absolute time
         List<Map.Entry<Double, List<MidiChunk.Event>>> entryList = new ArrayList<>(eventsGroupedByAbsoluteTime.entrySet());
-        var ret =  entryList.stream().sorted(Map.Entry.comparingByKey()).map(Map.Entry::getValue).toList();
-        return ret;
+        return entryList.stream().sorted(Map.Entry.comparingByKey()).map(Map.Entry::getValue).toList();
+    }
 
-//        Collections.sort(sortedKeys);
-//        return eventsGroupedByAbsoluteTime.entrySet().stream()
-//                .sorted(Map.Entry.comparingByKey())
-//                .toList();
-//        return eventsGroupedByAbsoluteTime.values().stream()
-//                .sorted(Comparator.comparing(events -> events.get(0).absoluteTime))
-//                .toList();
+    /**
+     * The hexadecimal contents in the same format as Unix hexdump
+     */
+    public String hexdump() {
+        return header.hexdump() + tracks.stream().map(track -> track.hexdump()).collect(Collectors.joining(""));
     }
 
     /**
@@ -437,7 +440,7 @@ public class Midi {
              * Validate and construct a Midi Header
              * @param id The first four bytes of a chunk identify it. Must be "MThd".
              * @param len The number of bytes in this chunk (excludes the id bytes)
-             * @param format One of the three possible io.feydor.Midi file formats
+             * @param format One of the three possible Midi file formats
              * @param ntracks The number of track chunks in the file
              * @param tickdiv Specifies the timing interval to be used. Use metrical timing (Bar.Beat) otherwise use timecode (Hrs.Mins.Secs.Frames).
              *                With metrical timing, the timing interval is tempo related, otherwise it is in absolute time.
@@ -485,6 +488,17 @@ public class Midi {
                 this.ntracks = ntracks;
                 this.tickdiv = ByteFns.toUnsignedShort(tickdiv);
                 this.useMetricalTiming = !msbSet;
+            }
+
+            /**
+             * The hexadecimal contents in the same format as Unix hexdump
+             */
+            public String hexdump() {
+                return ByteFns.toHex(id.getBytes())
+                        + String.format("%08x", len)
+                        + String.format("%04x", format.word)
+                        + String.format("%04x", ntracks)
+                        +String.format("%04x", tickdiv);
             }
 
             @Override
@@ -576,6 +590,15 @@ public class Midi {
                         ", timeSignature=" + timeSignature +
                         '}';
             }
+
+            /**
+             * The hexadecimal contents in the same format as Unix hexdump
+             */
+            public String hexdump() {
+                return ByteFns.toHex(id.getBytes())
+                        + String.format("%08x", len)
+                        + events.stream().map(event -> event.hexdump()).collect(Collectors.joining(""));
+            }
         }
 
         record MetaEventParseResult(int type, byte[] data, int len) {}
@@ -591,6 +614,9 @@ public class Midi {
 
             /** The duration of the event in ticks */
             public int ticks;
+
+            /** The number of bytes used to store the ticks in the file. 1-4 bytes. */
+            public int tickBytes;
 
             /** The event's bytes */
             public String message;
@@ -613,11 +639,16 @@ public class Midi {
              * @param ticks a variable length quantity (1 - 4 bytes) denoting the time since the last event
              * @param message 2 or more bytes describing the event itself
              */
-            public Event(MidiEventType type, MidiEventSubType subType, int ticks,
+            public Event(MidiEventType type, MidiEventSubType subType, int ticks, int tickBytes,
                          String message, boolean useRunningStatus, int dataStart, int dataLen) {
+                if (tickBytes < 0 || tickBytes > 4) {
+                    throw new IllegalArgumentException("The varlen for ticks must be between 1 and 4 bytes: tickBytes=" + tickBytes);
+                }
+
                 this.type = type;
                 this.subType = subType;
                 this.ticks = ticks;
+                this.tickBytes = tickBytes;
                 this.message = message;
                 this.useRunningStatus = useRunningStatus;
                 this.dataStart = dataStart;
@@ -692,6 +723,26 @@ public class Midi {
             public double absoluteTime() {
                 return absoluteTime;
             }
+
+            private static int byteLen(long scalar) {
+                if (scalar <= 255) {
+                    return 1;
+                } else  if (scalar <= 65_535) {
+                    return 2;
+                } else if (scalar <= 16_777_215) {
+                    return 3;
+                } else if (scalar <= 4_294_967_295L) {
+                    return 4;
+                }
+                throw new IllegalArgumentException("Too large for 4 bytes: input=" + scalar);
+            }
+
+            /**
+             * The hexadecimal contents in the same format as Unix hexdump
+             */
+            public String hexdump() {
+                return VarLenQuant.encode(ticks) + message;
+            }
         }
     }
 
@@ -701,19 +752,5 @@ public class Midi {
 
     private void logDebug(String format, Object ... args) {
         if (verbose) System.out.printf(format, args);
-    }
-}
-
-/**
- * The 2 types of MIDI Chunks
- */
-enum MidiIdentifier {
-    MThd("MThd".getBytes()),
-    MTrk("MTrk".getBytes());
-
-    final byte[] id;
-
-    MidiIdentifier(byte[] id) {
-        this.id = id;
     }
 }

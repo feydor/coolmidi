@@ -1,10 +1,8 @@
 package io.feydor;
 
 import io.feydor.midi.Midi;
-import io.feydor.midi.MidiFileFormat;
 
 import java.io.IOException;
-import java.util.List;
 
 /**
  * Dumps the header (and optionally the events) in a MIDI file
@@ -39,19 +37,31 @@ public class MidiDumper {
         for (var track : midi.tracks) {
             System.out.printf("%02d|%05d|%05d\n", track.trackNum, track.len, track.events.size());
         }
+
+        // dump bytes
+        System.out.println("Dumping parsed bytes...");
+        String bytes = midi.hexdump();
+        System.out.println(formatBytes(bytes, 0, 60));
+    }
+
+    private static String formatBytes(String bytes, int spacing, int col) {
+        var sb = new StringBuffer(bytes.length());
+        for (int i=0; i<bytes.length(); i++) {
+            if (spacing != 0 && i != 0 && i % spacing == 0) {
+                sb.append(" ");
+            }
+            if (col != 0 && i != 0 && i % col == 0) {
+                sb.append("\n");
+            }
+            sb.append(bytes.charAt(i));
+        }
+        return sb.toString();
     }
 
     private static String midiChannelsToString(boolean[] channels) {
         var sb = new StringBuilder();
         for (int i = 0; i < channels.length; i++)
             sb.append(String.format("c%d=%c ", i+1, channels[i] ? '1' : '0'));
-        return sb.toString();
-    }
-
-    private static <T> String addNewlinesToList(List<T> list) {
-        var sb = new StringBuilder();
-        for (var item : list)
-            sb.append(item).append("\n");
         return sb.toString();
     }
 }

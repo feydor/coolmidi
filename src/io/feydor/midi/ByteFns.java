@@ -16,7 +16,7 @@ public class ByteFns {
     public static String toHex(byte[] buf) {
         var sb = new StringBuilder();
         for (byte b : buf) {
-            sb.append(String.format("%02X", b));
+            sb.append(String.format("%02x", b));
         }
         return sb.toString();
     }

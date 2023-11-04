@@ -71,10 +71,11 @@ public final class MidiCliPlayer {
                     } catch (IOException e) {
                         System.err.printf("The file failed to load: %s\n%s. Skipping...\n", file.getAbsolutePath(), e.getMessage());
                         return null;
-                    } catch (RuntimeException e) {
-                        System.err.printf("The MIDI file failed to parse: %s\n%s. Skipping...\n", file.getAbsolutePath(), e.getMessage());
-                        return null;
                     }
+//                    catch (RuntimeException e) {
+//                        System.err.printf("The MIDI file failed to parse: %s\n%s. Skipping...\n", file.getAbsolutePath(), e.getMessage());
+//                        return null;
+//                    }
                 })
                 .filter(Objects::nonNull)
                 .toList();

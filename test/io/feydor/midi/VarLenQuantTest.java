@@ -69,4 +69,46 @@ class VarLenQuantTest {
         assertEquals(0x023c, res2.value);
         assertEquals(2, res2.nbytes);
     }
+
+    @Test
+    void varlenDecodeWithBytesWorks() {
+        // FF 7F -> 00 00 3F FF
+        var res = VarLenQuant.decode(new int[]{0xFF, 0x7F});
+        assertEquals(0x3FFF, res.value);
+        assertEquals(2, res.nbytes);
+
+        // 81 80 80 00 -> 00200000
+        var res1 = VarLenQuant.decode(new int[]{0x81, 0x80, 0x80, 0x0});
+        assertEquals(0x00200000, res1.value);
+        assertEquals(4, res1.nbytes);
+
+        // 84 3c -> 02 3c
+        var res2 = VarLenQuant.decode(new int[]{0x84, 0x3c});
+        assertEquals(0x023c, res2.value);
+        assertEquals(2, res2.nbytes);
+
+        var x = VarLenQuant.decode(new int[]{0x98, 0x0});
+        assertEquals(3072, x.value);
+        assertEquals(2, x.nbytes);
+    }
+
+    @Test
+    void varlenEncodeWorks() {
+        // 00 00 3F FF -> FF 7F
+        String res = VarLenQuant.encode(0x00003FFF);
+        assertEquals("ff7f", res);
+
+        // 00200000 -> 81 80 80 00
+        String res1 = VarLenQuant.encode(0x00200000);
+        assertEquals("81808000", res1);
+
+        // 02 3c -> 84 3c
+        var res2 = VarLenQuant.encode(0x023c);
+        assertEquals("843c", res2);
+
+        String x = VarLenQuant.encode(3072);
+        assertEquals("9800", x);
+
+        assertEquals("00", VarLenQuant.encode(0));
+    }
 }

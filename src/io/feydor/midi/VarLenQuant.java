@@ -5,6 +5,8 @@ import io.feydor.midi.exceptions.InvalidVarLenParseException;
 import java.io.BufferedInputStream;
 import java.io.EOFException;
 import java.io.IOException;
+import java.util.Iterator;
+import java.util.stream.IntStream;
 
 /**
  * A variable length quantity.
@@ -23,12 +25,13 @@ import java.io.IOException;
  * 		//      00004000 (16384)  81 80 00
  */
 public class VarLenQuant {
-
     /** The quantity itself */
     public int value;
 
     /** The number of bytes used to store the quantity */
     public short nbytes;
+
+    private static final int MAX_BYTES = 4;
 
     private VarLenQuant(int value, short nbytes) {
         this.value = value;
@@ -42,39 +45,31 @@ public class VarLenQuant {
      * @throws IOException When the file is empty or at EoF
      * @throws InvalidVarLenParseException When more than 4 bytes are used to encode the VarLen
      */
-    static public VarLenQuant readBytes(BufferedInputStream file) throws IOException {
+    static public VarLenQuant readBytes(BufferedInputStream file) {
+        return decode(new FileStreamByteIterator(file));
+    }
+
+    static public VarLenQuant decode(int[] bytes) {
+        return decode(IntStream.of(bytes).iterator());
+    }
+
+    /**
+     * src: <a href="https://en.wikipedia.org/wiki/Variable-length_quantity">Variable-length quantity</a>
+     * @param bytes returns bytes from MSB to LSB
+     * @return the decoded value and the number of bytes it took up
+     */
+    static public VarLenQuant decode(Iterator<Integer> bytes) {
         /*
          * Varlen quantity consists of 7-bit chunks, with the MSB of each signaling the last chunk.
          *
          * Only the bottom 7 bits of each byte contributes to the delta-time, the MSB indicates (when set) that another byte follows.
          * This means, the last byte of a delta-time will have its top bit clear.
          */
-
-        /*
-         *   VLQ Byte
-         * 7 6 5 4 3 2 1 0
-         * ---------------
-         * A <-   Bn    ->
-         *
-         * If A is 0, then this is the last VLQ byte in the value.
-         * If A is 1, then another VLQ byte follows.
-         *
-         * B is a 7-bit number (0x00-0x7F) and n is the position in the byte where B0 is the least significant
-         */
-
-        // Example:
-        // 0x81 -> 1000 0001 -> 000 0001                   = 0x01
-        // 0x80 -> 1000 0000 -> 000 0001 000 0000          = 0x80
-        // 0x80 -> ""        -> 000 0001 000 0000 000 0000 = 0x4000
-        // 0x00 -> 0000 0000 -> 000 0001 000 0000 000 0000 000 0000 = 0x200000
-
         int val = 0;
         short nbytes = 0;
+        int i = 0;
         while (true) {
-            int b = file.read();
-            if (b == -1) {
-                throw new EOFException("End of the file reached while attempting to read from it.");
-            }
+            int b = bytes.next();
 
             val = (val << 7) | (b & 0x7f); // concat the 7 least significant bits
             nbytes++;
@@ -92,5 +87,63 @@ public class VarLenQuant {
         }
 
         return new VarLenQuant(val, nbytes);
+    }
+
+    /**
+     * Converts a number into VLQ bytes. Reverse of decode.
+     */
+    static public String encode(int n) {
+        int i = 0;
+        byte[] bytes = new byte[MAX_BYTES];
+        while (n > 0x7f) {
+            byte lsb = (byte) (n & 0x7f);
+            if (i != 0) lsb |= (byte) 0x80; // set sb for all but first group
+            bytes[i++] = lsb;
+            n >>= 7;
+        }
+        if (i != 0) n |= 0x80; // set last msb, unless first
+        bytes[i++] = (byte) n;
+
+        // bytes is in reverse order
+        byte[] buf = new byte[i];
+        for (int j=0; j<buf.length; ++j) {
+            buf[j] = bytes[buf.length-j-1];
+        }
+        return ByteFns.toHex(buf);
+    }
+
+    @Override
+    public String toString() {
+        return "VarLenQuant{" +
+                "value=" + value +
+                ", nbytes=" + nbytes +
+                '}';
+    }
+
+    static class FileStreamByteIterator implements Iterator<Integer> {
+        private final BufferedInputStream file;
+        public FileStreamByteIterator(BufferedInputStream file) {
+            this.file = file;
+        }
+
+        @Override
+        public boolean hasNext() {
+            try {
+                return file.available() > 0;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public Integer next() {
+            try {
+                var ret = file.read();
+                if (ret == -1) throw new EOFException("End of the file reached while attempting to read from it.");
+                return ret;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 }

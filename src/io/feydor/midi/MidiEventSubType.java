@@ -46,7 +46,8 @@ public enum MidiEventSubType {
     private static final List<MidiEventSubType> CHANNEL_TYPES = List.of(
             PROGRAM_CHANGE, CHANNEL_PRESSURE, CONTROLLER, PITCH_BEND, NOTE_ON, NOTE_OFF, POLYPHONIC_PRESSURE
     );
-    private static final List<MidiEventSubType> TIMING_RELATED_TYPES = List.of(MARKER, CUEPOINT, SET_TEMPO, SMPTE_OFFSET, TIME_SIGNATURE, KEY_SIGNATURE);
+    private static final List<MidiEventSubType> TIMING_RELATED_TYPES = List.of(MARKER, CUEPOINT, SET_TEMPO, SMPTE_OFFSET,
+            TIME_SIGNATURE, KEY_SIGNATURE);
 
     /**
      * Only Meta-events have a type byte

@@ -72,16 +72,12 @@ public final class MidiCliPlayer {
                         System.err.printf("The file failed to load: %s\n%s. Skipping...\n", file.getAbsolutePath(), e.getMessage());
                         return null;
                     }
-//                    catch (RuntimeException e) {
-//                        System.err.printf("The MIDI file failed to parse: %s\n%s. Skipping...\n", file.getAbsolutePath(), e.getMessage());
-//                        return null;
-//                    }
                 })
                 .filter(Objects::nonNull)
                 .toList();
 
         if (!playlist.isEmpty()) {
-            System.out.printf("Parsed %d MIDI files\n", playlist.size());
+            if (verbose) System.out.printf("Parsed %d MIDI files\n", playlist.size());
             playlist = new ArrayList<>(playlist);
             Collections.shuffle(playlist);
         }

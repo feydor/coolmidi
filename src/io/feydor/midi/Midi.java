@@ -123,7 +123,8 @@ public class Midi {
      * @param len the # of bytes in the Track Chunk, parsed from the header
      * @return the parsed track and the # of bytes read
      */
-    private MidiTrackParseResult parseMidiTrack(BufferedInputStream file, byte[] id, int len, int trackNum, boolean[] channelUsed) throws IOException {
+    private MidiTrackParseResult parseMidiTrack(BufferedInputStream file, byte[] id, int len, int trackNum,
+                                                boolean[] channelUsed) throws IOException {
         boolean isTrackChunk = Arrays.equals(id, MidiIdentifier.MTrk.id);
         if (!isTrackChunk) {
             throw new MidiParseException("Messed up parsing a track header! id=" + Arrays.toString(id));
@@ -197,19 +198,21 @@ public class Midi {
                             file.skipNBytes(1); // skip the 04
                             byte[] timeSig = file.readNBytes(4);
                             if ((timeSig[3] & 0xFF) != 0x08) {
-                                logDebug("WARNING: A Time Signature event (%s) is specifying a # of 32nd notes in a MIDI quarter-note (%02x) that is NOT supported by my parser, for now...\n",
+                                logDebug("WARNING: A Time Signature event (%s) is specifying a # of 32nd notes in a" +
+                                                "MIDI quarter-note (%02x) that is NOT supported by my parser, for now...\n",
                                         "FF5804" + ByteFns.toHex(timeSig), timeSig[3] & 0xFF);
                             }
 
-                            var newTimeSignature = new MidiChunk.TimeSignature(timeSig[0] & 0xFF, timeSig[1] & 0xFF,
+                            var newTimeSig = new MidiChunk.TimeSignature(timeSig[0] & 0xFF, timeSig[1] & 0xFF,
                                     timeSig[2] & 0xFF, timeSig[3] & 0xFF);
                             if (timeSignatureSet) {
-                                logDebug("WARNING: The time signature for track#%d has already been set! OLD=%s NEW=%s\n", trackNum, timeSignature, newTimeSignature);
+                                logDebug("WARNING: The time signature for track#%d has already been set! OLD=%s NEW=%s\n",
+                                        trackNum, timeSignature, newTimeSig);
                             }
 
                             logDebug("Time Signature detected: " + "FF5804" + ByteFns.toHex(timeSig) + " delta-time= " + dt.value);
 
-                            timeSignature = newTimeSignature;
+                            timeSignature = newTimeSig;
                             timeSignatureSet = true;
                             dataStart = 3;
                             dataLen = 4;
@@ -220,9 +223,10 @@ public class Midi {
                             file.skipNBytes(1); // skip the 03
                             int newTempo = ByteFns.toUnsignedInt(file.readNBytes(3));
                             // Setting the tempo of the track (and for format_1 all of the tracks) as the first SET_TEMPO event encountered
-                            // TODO: This is arbitrary but I will need to come up with a way to set each track's current tempo dynamically at runtime
+                            // TODO: This is arbitrary but I will need to come up with a way to set each track'scurrent tempo dynamically at runtime
                             if (tempoSet) {
-                                logDebug("WARNING: The tempo for track#%d has already been set! OLD=%d NEW=%d\nSkipping change...\n", trackNum, tempo, newTempo);
+                                logDebug("WARNING: The tempo for track#%d has already been set! OLD=%d NEW=%d\nSkipping change...\n",
+                                        trackNum, tempo, newTempo);
                             } else {
                                 tempo = newTempo;
                             }

@@ -2,11 +2,13 @@ CoolMidi
 ========
 A MIDI parser, sequencer, and CLI player.
 * Plays format 0 & 1 MIDI files
+* Files with SysEx events should work (tested files with GS, XG)
 * A few different CLI UI options
 
 And also what isn't supported (yet):
 * Format 2 MIDI files
 * Mid track tempo/time signature changes (right now setting global tempo as the first tempo change encountered)
+  * Need to be able to change tempo (also other timing events) at runtime. Format 1 tempo changes are all in track 1 and are global. Format 2 tempo changes are track-local.
 * There's likely a lot MIDI files out their with broken headers that will raise an exception in CoolMIDI
 
 UI Screenshot

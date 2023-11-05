@@ -39,4 +39,11 @@ class ByteFnsTest {
         assertArrayEquals(new byte[]{(byte)0xFF, (byte)0xFF}, ByteFns.fromHex("FFFF"));
         assertArrayEquals(new byte[]{(byte)0xFF}, ByteFns.fromHex("FF"));
     }
+
+    @Test
+    void toHexWorks_byte() {
+        assertEquals("ff", ByteFns.toHex((byte)255));
+        assertEquals("7f", ByteFns.toHex((byte)127));
+        assertEquals("00", ByteFns.toHex((byte)0));
+    }
 }

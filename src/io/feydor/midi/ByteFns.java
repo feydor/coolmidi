@@ -95,4 +95,8 @@ public class ByteFns {
         System.arraycopy(buf, 0, widened, offset, buf.length);
         return widened;
     }
+
+    public static String toHex(byte n) {
+        return String.format("%02x", (0xFF & n));
+    }
 }

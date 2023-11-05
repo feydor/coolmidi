@@ -61,16 +61,10 @@ public class Midi {
         logDebug("Starting to parse " + filename);
 
         // Now start parsing the Header chunk
-        // <Header> = <ident:4B> <len:4B> <format:2B> <ntracks:2B> <tickdiv:2B>
-        byte[] chunkId = file.readNBytes(4);
-        int chunklen = ByteFns.toUnsignedInt(file.readNBytes(4));
-        short format = ByteFns.toUnsignedShort(file.readNBytes(2));
-        short ntracks = ByteFns.toUnsignedShort(file.readNBytes(2));
-        byte[] tickdiv = file.readNBytes(2);
-        header = new MidiChunk.Header(chunkId, chunklen, format, ntracks, tickdiv);
+        header = MidiChunk.Header.readFrom(file);
 
         // Now since we know the # of tracks, we can start parsing the tracks and their events
-        for (int i = 0; i < ntracks; ++i) {
+        for (int i = 0; i < header.ntracks; ++i) {
             // <Track> = <header <id:4B> <chunklen:4B>> <events:1+ (see parseMidiTrack)>
             byte[] id = file.readNBytes(4);
             int len = ByteFns.toUnsignedInt(file.readNBytes(4));
@@ -103,10 +97,9 @@ public class Midi {
         logDebug("Printing the MIDI header: " + header);
 
         if (file.available() > 1) {
-            logDebug(Arrays.toString(file.readAllBytes()));
-            throw new MidiParseException("We didn't reach the EoF and apparently there is still some bytes " +
-                    "left even after going through all of the ntracks. So here's everything that's left: " +
-                    Arrays.toString(file.readAllBytes()));
+            byte[] remaining = file.readAllBytes();
+            logDebug("WARNING: We didn't reach the EoF and apparently there is still some bytes left over after track parsing. "
+                    + "So here's the rest of the bytes: " + ByteFns.toHex(remaining));
         }
 
         logDebug("Finished parsing " + filename);
@@ -171,8 +164,8 @@ public class Midi {
             messageLen++;
             var pair = MidiEventType.fromStatusByte(status, prevEvent);
             MidiEventType eventType = pair.first();
-            boolean useRunningStatus = pair.second();
-            if (useRunningStatus) {
+            boolean runningStatus = pair.second();
+            if (runningStatus) {
                 status = prevStatus;
             }
 
@@ -203,17 +196,20 @@ public class Midi {
                                         "FF5804" + ByteFns.toHex(timeSig), timeSig[3] & 0xFF);
                             }
 
+                            // TODO: Dynamically change time signature at runtime in MidiScheduler
+                            // For now, just save the first time signature event encountered
                             var newTimeSig = new MidiChunk.TimeSignature(timeSig[0] & 0xFF, timeSig[1] & 0xFF,
                                     timeSig[2] & 0xFF, timeSig[3] & 0xFF);
                             if (timeSignatureSet) {
-                                logDebug("WARNING: The time signature for track#%d has already been set! OLD=%s NEW=%s\n",
-                                        trackNum, timeSignature, newTimeSig);
+                                logDebug("WARNING: The time signature for track#%d has already been set! Skipping... "
+                                                + "OLD=%s NEW=%s\n", trackNum, timeSignature, newTimeSig);
+                            } else {
+                                timeSignature = newTimeSig;
+                                timeSignatureSet = true;
+                                logDebug(String.format("New time signature detected: bytes=FF5804%s varlen_dt=%d parsed=%s",
+                                        ByteFns.toHex(timeSig), dt.value, newTimeSig));
                             }
 
-                            logDebug("Time Signature detected: " + "FF5804" + ByteFns.toHex(timeSig) + " delta-time= " + dt.value);
-
-                            timeSignature = newTimeSig;
-                            timeSignatureSet = true;
                             dataStart = 3;
                             dataLen = 4;
                             yield 5;
@@ -229,8 +225,9 @@ public class Midi {
                                         trackNum, tempo, newTempo);
                             } else {
                                 tempo = newTempo;
+                                tempoSet = true;
                             }
-                            tempoSet = true;
+
                             dataStart = 3;
                             dataLen = 3;
                             yield 4;
@@ -290,7 +287,7 @@ public class Midi {
                                 channelUsed[channel] = true;
                             }
 
-                            int nbyte = useRunningStatus ? 1 : 2;
+                            int nbyte = runningStatus ? 1 : 2;
                             file.skipNBytes(nbyte);
                             dataStart = 1;
                             dataLen = 2;
@@ -298,7 +295,7 @@ public class Midi {
                         }
                         // 2-byte messages
                         case 0xC, 0xD: {
-                            int nbyte = useRunningStatus ? 0 : 1;
+                            int nbyte = runningStatus ? 0 : 1;
                             file.skipNBytes(nbyte);
                             dataStart = 1;
                             dataLen = 1;
@@ -330,8 +327,8 @@ public class Midi {
                 }
             }
 
-            if (messageLen < 2) {
-                throw new RuntimeException("Failed to update the message_len!");
+            if (messageLen < 2 && !runningStatus) {
+                throw new RuntimeException("Failed to update the non-runningStatus message_len! status=" + status);
             }
 
             // Reset to the point before the event data
@@ -344,11 +341,11 @@ public class Midi {
             // Just absolutely fuck it, add the previous status to the runningStatus message
             // Yes, this negates the entire performance reason for having running status but it
             // makes my life so easier so eh
-            if (useRunningStatus) {
-                message = ByteFns.toHex(new byte[]{(byte) prevStatus}) + message;
+            if (runningStatus) {
+                message = ByteFns.toHex((byte) prevStatus) + message;
             }
 
-            var event = new MidiChunk.Event(eventType, subType, dt.value, dt.nbytes, message, useRunningStatus, dataStart, dataLen);
+            var event = new MidiChunk.Event(eventType, subType, dt.value, dt.nbytes, message, runningStatus, dataStart, dataLen);
             prevEvent = event;
             prevStatus = status;
             events.add(event);
@@ -390,7 +387,6 @@ public class Midi {
                 .filter(event -> event.subType != MidiEventSubType.END_OF_TRACK)
                 .collect(Collectors.groupingBy(MidiChunk.Event::absoluteTime));
 
-        // TODO: Fix me, still getting screeching
         // Make sure that META events are always sent before the MIDI ones otherwise you occasionaly get strange notes in the begining
         // Other events stay in the same relative position
         for (var events : eventsGroupedByAbsoluteTime.entrySet()) {
@@ -405,7 +401,7 @@ public class Midi {
     }
 
     /**
-     * The hexadecimal contents in the same format as Unix hexdump
+     * The hexadecimal contents in the same format as Unix hexdump/xdd
      */
     public String hexdump() {
         return header.hexdump() + tracks.stream().map(track -> track.hexdump()).collect(Collectors.joining(""));
@@ -491,6 +487,26 @@ public class Midi {
                 this.ntracks = ntracks;
                 this.tickdiv = ByteFns.toUnsignedShort(tickdiv);
                 this.useMetricalTiming = !msbSet;
+            }
+
+            /**
+             * Reads the bytes that make up a MIDI header from the file
+             * @param file an open file input stream
+             * @return A MIDI Header
+             * @throws IOException When EOF or other file reading exception is thrown.
+             */
+            public static Header readFrom(BufferedInputStream file) throws IOException {
+                if (file.available() < 1) {
+                    throw new IllegalArgumentException("The file input stream does not have any remaining bytes. file=" + file);
+                }
+
+                // <Header> = <ident:4B> <len:4B> <format:2B> <ntracks:2B> <tickdiv:2B>
+                byte[] chunkId = file.readNBytes(4);
+                int chunklen = ByteFns.toUnsignedInt(file.readNBytes(4));
+                short format = ByteFns.toUnsignedShort(file.readNBytes(2));
+                short ntracks = ByteFns.toUnsignedShort(file.readNBytes(2));
+                byte[] tickdiv = file.readNBytes(2);
+                return new MidiChunk.Header(chunkId, chunklen, format, ntracks, tickdiv);
             }
 
             /**
@@ -625,7 +641,7 @@ public class Midi {
             public String message;
 
             /** If set, the message's status byte is the same the previous message and the receiver should assume it was the same as the last one. */
-            public boolean useRunningStatus;
+            public boolean runningStatus;
 
             /** The byte where the data starts in the message */
             private final int dataStart;
@@ -643,7 +659,7 @@ public class Midi {
              * @param message 2 or more bytes describing the event itself
              */
             public Event(MidiEventType type, MidiEventSubType subType, int ticks, int tickBytes,
-                         String message, boolean useRunningStatus, int dataStart, int dataLen) {
+                         String message, boolean runningStatus, int dataStart, int dataLen) {
                 if (tickBytes < 0 || tickBytes > 4) {
                     throw new IllegalArgumentException("The varlen for ticks must be between 1 and 4 bytes: tickBytes=" + tickBytes);
                 }
@@ -653,7 +669,7 @@ public class Midi {
                 this.ticks = ticks;
                 this.tickBytes = tickBytes;
                 this.message = message;
-                this.useRunningStatus = useRunningStatus;
+                this.runningStatus = runningStatus;
                 this.dataStart = dataStart;
                 this.dataLen = dataLen;
             }
@@ -716,7 +732,7 @@ public class Midi {
                         ", subType=" + subType +
                         ", ticks=" + ticks +
                         ", message='" + message + '\'' +
-                        ", useRunningStatus=" + useRunningStatus +
+                        ", runningStatus=" + runningStatus +
                         ", dataStart=" + dataStart +
                         ", dataLen=" + dataLen +
                         ", absoluteTime=" + absoluteTime +
@@ -732,7 +748,7 @@ public class Midi {
              */
             public String hexdump() {
                 // running status means this event is using the previous event's status byte
-                String msgBytes = useRunningStatus ? message.substring(2) : message;
+                String msgBytes = runningStatus ? message.substring(2) : message;
                 return VarLenQuant.encode(ticks) + msgBytes;
             }
         }

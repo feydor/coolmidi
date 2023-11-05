@@ -7,6 +7,7 @@ import javax.sound.midi.*;
 import javax.sound.midi.spi.MidiDeviceProvider;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.LongAdder;
 
 public class MidiScheduler {
 
@@ -74,6 +75,7 @@ public class MidiScheduler {
         var eventBatches = midi.allEventsInAbsoluteTime();
         Timer timer = new Timer();
         long beforeSequencing = System.nanoTime();
+        LongAdder tempoChanges = new LongAdder();
         for (var eventBatch : eventBatches) {
             long absoluteTimeInMs = Math.round(eventBatch.get(0).absoluteTime);
             timer.schedule(new TimerTask() {
@@ -82,11 +84,13 @@ public class MidiScheduler {
                     for (var event : eventBatch) {
                         MidiMessage msg;
                         try {
-                            msg = makeMidiMessage(event, channels);
+                            msg = makeMidiMessage(event, channels, tempoChanges);
                         } catch (InvalidMidiDataException e) {
                             throw new RuntimeException(e);
                         }
-                        receiver.send(msg, -1);
+
+                        if (msg != null)
+                            receiver.send(msg, -1);
                     }
                 }
             }, absoluteTimeInMs);
@@ -105,16 +109,33 @@ public class MidiScheduler {
      * @return The formatted message ready to be sent
      * @throws InvalidMidiDataException When an invalid MIDI event is encountered
      */
-    private MidiMessage makeMidiMessage(Midi.MidiChunk.Event event, MidiChannel[] channels) throws InvalidMidiDataException {
+    private MidiMessage makeMidiMessage(Midi.MidiChunk.Event event, MidiChannel[] channels, LongAdder tempoChanges) throws InvalidMidiDataException {
         return switch (event.type) {
             case MIDI -> {
                 var parsed = event.parseAsChannelMidiEvent();
                 updateChannels(event, parsed, channels);
+                // TODO: Test with different message if using runningStatus
+                // use bach_348.mid
                 yield new ShortMessage(parsed.cmd(), parsed.channel(), parsed.data1(), parsed.data2());
+//                yield new ShortMessage(ByteFns.fromHex(event.message));
             }
             case META -> {
                 var parsed = event.parseAsMetaEvent();
-                yield new MetaMessage(parsed.type(), parsed.data(), parsed.len());
+                // TODO: Send only the last SET_TEMPO change? instead of the first
+                // also try KEY_SIGNATURE, MARKER, TIME_SIGNATURE
+                if (event.subType == MidiEventSubType.SET_TEMPO && tempoChanges.intValue() == 0) {
+                    // TODO: SET_TEMPO is not for the Receiver its for me to manually adjust the rest of the event's absolute times
+                    // FORMAT_1 means track 1 has all of the Global tempo changes
+                    // FORMAT_2 means each track has its own tempo changes
+                    tempoChanges.increment();
+                } else if (event.subType == MidiEventSubType.SET_TEMPO && tempoChanges.intValue() != 0) {
+                    yield null;
+                } else if (event.subType == MidiEventSubType.TIME_SIGNATURE || event.subType == MidiEventSubType.KEY_SIGNATURE) {
+                    yield null;
+                }
+
+                yield new MetaMessage(parsed.type(), ByteFns.fromHex(event.message), event.message.length()/2);
+//                yield new MetaMessage(parsed.type(), parsed.data(), parsed.len());
             }
             case SYSEX -> {
                 var parsed = event.parseAsSysexEvent();

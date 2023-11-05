@@ -1,15 +1,12 @@
 CoolMidi
 ========
-A MIDI parser, sequencer, and CLI player with the following features:
-* Support for format 0 & 1 MIDI files including the following standards: GM, XG, GS
-* Plays back all provided MIDI files in the given order (playlist support)
+A MIDI parser, sequencer, and CLI player.
+* Plays format 0 & 1 MIDI files
 * A few different CLI UI options
-* MIDI files with [running status](http://midi.teragonaudio.com/tech/midispec/run.htm) work fine
-* ~~The name sounds like chlamydia~~
 
 And also what isn't supported (yet):
 * Format 2 MIDI files
-* Some MIDI files that have their tempo information encoded in BPM instead of the standard Pulse Per Quarter Note (PPQN) will play a lot slower than expected
+* Mid track tempo/time signature changes (right now setting global tempo as the first tempo change encountered)
 * There's likely a lot MIDI files out their with broken headers that will raise an exception in CoolMIDI
 
 UI Screenshot

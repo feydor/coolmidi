@@ -34,8 +34,6 @@ public enum MidiEventType {
             default -> switch (upperNibble) {
                 case 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE -> new Pair<>(MIDI, false);
                 default -> {
-                    // TODO: Might want to pass in the prevEvent ans just return it's status?
-                    // Instead of assumming it will always be MIDI, it might though
                     if (prevEvent != null && prevEvent.type == MIDI) {
                         yield new Pair<>(MIDI, true);
                     } else {

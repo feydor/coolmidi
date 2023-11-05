@@ -197,7 +197,7 @@ public class Midi {
                             file.skipNBytes(1); // skip the 04
                             byte[] timeSig = file.readNBytes(4);
                             if ((timeSig[3] & 0xFF) != 0x08) {
-                                logDebug("WARNING: A Time Signature event (%s) is specifying a # of 32nd notes in a MIDI quarter-note (%02X) that is NOT supported by my parser, for now...\n",
+                                logDebug("WARNING: A Time Signature event (%s) is specifying a # of 32nd notes in a MIDI quarter-note (%02x) that is NOT supported by my parser, for now...\n",
                                         "FF5804" + ByteFns.toHex(timeSig), timeSig[3] & 0xFF);
                             }
 
@@ -219,10 +219,13 @@ public class Midi {
                         case 0x51 -> { // Tempo FF 51 03 tt tt tt
                             file.skipNBytes(1); // skip the 03
                             int newTempo = ByteFns.toUnsignedInt(file.readNBytes(3));
+                            // Setting the tempo of the track (and for format_1 all of the tracks) as the first SET_TEMPO event encountered
+                            // TODO: This is arbitrary but I will need to come up with a way to set each track's current tempo dynamically at runtime
                             if (tempoSet) {
-                                logDebug("WARNING: The tempo for track#%d has already been set! OLD=%d NEW=%d\n", trackNum, tempo, newTempo);
+                                logDebug("WARNING: The tempo for track#%d has already been set! OLD=%d NEW=%d\nSkipping change...\n", trackNum, tempo, newTempo);
+                            } else {
+                                tempo = newTempo;
                             }
-                            tempo = newTempo;
                             tempoSet = true;
                             dataStart = 3;
                             dataLen = 3;
@@ -345,10 +348,6 @@ public class Midi {
             prevEvent = event;
             prevStatus = status;
             events.add(event);
-
-            if (event.subType == MidiEventSubType.NOTE_ON && "914c64".equals(event.message)) {
-                System.out.println("YEET");
-            }
         }
 
         // Last event in each chunk MUST be End of Track
@@ -724,24 +723,13 @@ public class Midi {
                 return absoluteTime;
             }
 
-            private static int byteLen(long scalar) {
-                if (scalar <= 255) {
-                    return 1;
-                } else  if (scalar <= 65_535) {
-                    return 2;
-                } else if (scalar <= 16_777_215) {
-                    return 3;
-                } else if (scalar <= 4_294_967_295L) {
-                    return 4;
-                }
-                throw new IllegalArgumentException("Too large for 4 bytes: input=" + scalar);
-            }
-
             /**
              * The hexadecimal contents in the same format as Unix hexdump
              */
             public String hexdump() {
-                return VarLenQuant.encode(ticks) + message;
+                // running status means this event is using the previous event's status byte
+                String msgBytes = useRunningStatus ? message.substring(2) : message;
+                return VarLenQuant.encode(ticks) + msgBytes;
             }
         }
     }

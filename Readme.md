@@ -11,7 +11,7 @@ And also what isn't supported (yet):
 
 UI Screenshot
 -------------
-![Screenshot](/Screenshot%202023-11-02%20010229.png)
+<img src="/Screenshot%202023-11-02%20010229.png" width=898>
 
 Build
 -----

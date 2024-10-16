@@ -1,6 +1,6 @@
 CoolMidi
 ========
-A MIDI parser, sequencer, and CLI player.
+A MIDI parser, sequencer, and CLI player. Inspired by [tmidi](https://www.grandgent.com/tom/projects/tmidi/).
 * Plays format 0 & 1 MIDI files
 * Files with SysEx events should work (tested files with GS, XG)
 * A few different CLI UI options

@@ -1,7 +1,5 @@
 package io.feydor.midi;
 
-import java.util.Arrays;
-
 /**
  * The current state of a single MIDI channel
  */
@@ -97,7 +95,6 @@ public class MidiChannel {
                 ", program=" + program +
                 ", pitchBend=" + pitchBend +
                 ", pressure=" + pressure +
-//                ", polyphonicPressure=" + Arrays.toString(polyphonicPressure) +
                 '}';
     }
 }

@@ -1,6 +1,7 @@
 package io.feydor.midi;
 
 import io.feydor.midi.exceptions.MidiParseException;
+import io.feydor.util.VarLenQuant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 

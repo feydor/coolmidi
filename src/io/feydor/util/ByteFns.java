@@ -1,6 +1,7 @@
-package io.feydor.midi;
+package io.feydor.util;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 /**
  * Static functions for working with byte buffers
@@ -98,5 +99,26 @@ public class ByteFns {
 
     public static String toHex(byte n) {
         return String.format("%02x", (0xFF & n));
+    }
+
+    /**
+     * Get the ASCII-representartion of an array of hexadecimal bytes
+     * @param hexBytes hexadecimal byte buffer
+     * @return ASCII string
+     */
+    public static String toAscii(byte[] hexBytes) {
+        var output = new StringBuilder();
+        for (byte hexByte : hexBytes) {
+            output.append((char) hexByte);
+        }
+        return output.toString();
+    }
+
+    public static String toAscii(String hexBytes) {
+        var output = new StringBuilder();
+        for (int i=0; i<hexBytes.length(); i += 2) {
+            output.append((char) Integer.parseUnsignedInt(hexBytes.substring(i, i+2), 16));
+        }
+        return output.toString();
     }
 }

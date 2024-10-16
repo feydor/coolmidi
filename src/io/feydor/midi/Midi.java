@@ -2,12 +2,15 @@ package io.feydor.midi;
 
 import io.feydor.midi.exceptions.MidiInvalidHeaderException;
 import io.feydor.midi.exceptions.MidiParseException;
+import io.feydor.util.ByteFns;
+import io.feydor.util.VarLenQuant;
 
 import java.io.BufferedInputStream;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 /**
@@ -25,9 +28,10 @@ import java.util.stream.Collectors;
  */
 public class Midi {
     public MidiChunk.Header header;
-    public List<MidiChunk.Track> tracks = new ArrayList<>();
-    public boolean[] channelsUsed = new boolean[16]; // channels 0-15 -> 1-16
-    public String filename;
+    private final CopyOnWriteArrayList<MidiChunk.Track> tracks = new CopyOnWriteArrayList<>();
+    private final List<MidiChunk.Track> unmodifiableTracks;
+    public final boolean[] channelsUsed = new boolean[16]; // channels 0-15 -> 1-16
+    public final String filename;
     private static final String END_OF_TRACK = "FF2f00";
     private final boolean verbose;
 
@@ -40,12 +44,14 @@ public class Midi {
         this.filename = filename;
         this.verbose = verbose;
         parseMidiFile(filename);
+        unmodifiableTracks = Collections.unmodifiableList(tracks);
     }
 
     public Midi(String filename) throws IOException {
         this.filename = filename;
         this.verbose = true;
         parseMidiFile(filename);
+        unmodifiableTracks = Collections.unmodifiableList(tracks);
     }
 
     private void parseMidiFile(String filename) throws IOException {
@@ -104,6 +110,53 @@ public class Midi {
 
         logDebug("Finished parsing " + filename);
         file.close();
+    }
+
+    public void updateGlobalTempo(int newTempo) {
+        if (newTempo < 1) {
+            throw new IllegalArgumentException("newTempo must be greater than 0: newTempo=" + newTempo);
+        }
+        if (header.format != MidiFileFormat.FORMAT_1) {
+            throw new IllegalStateException("Only Format 1 MIDI files have a global tempo");
+        }
+
+        for (var track : tracks) {
+            track.setTempo(newTempo);
+        }
+    }
+
+    /**
+     * Current tempo for the MIDI file. Only makes sense if this file is a format 1 header.
+     * In that case, the global tempo is the tempo set by the first track.
+     * @throws IllegalStateException When this MIDI files is not in format 1
+     */
+    public int getGlobalTempo() {
+        if (header.format != MidiFileFormat.FORMAT_1) {
+            throw new IllegalStateException("Only Format 1 MIDI files have a global tempo");
+        }
+
+        return tracks.get(0).getTempo();
+    }
+
+    /**
+     * Current milliseconds per tick for the MIDI file
+     * @throws IllegalStateException When this MIDI files is not in format 1
+     */
+    public double msPerTick() {
+        if (header.format != MidiFileFormat.FORMAT_1) {
+            throw new IllegalStateException("Only Format 1 MIDI files have a global tempo");
+        }
+
+        return tracks.get(0).getTempo() / (double)header.tickdiv / 1000.0;
+    }
+
+    /** Returns an unmodifiable view of the tracks */
+    public List<MidiChunk.Track> getTracks() {
+        return unmodifiableTracks;
+    }
+
+    public int numTracks() {
+        return tracks.size();
     }
 
     /** The result of parseMidiTrack: the parsed track and the # of bytes read */
@@ -221,7 +274,7 @@ public class Midi {
                             // Setting the tempo of the track (and for format_1 all of the tracks) as the first SET_TEMPO event encountered
                             // TODO: This is arbitrary but I will need to come up with a way to set each track'scurrent tempo dynamically at runtime
                             if (tempoSet) {
-                                logDebug("WARNING: The tempo for track#%d has already been set! OLD=%d NEW=%d\nSkipping change...\n",
+                                logDebug("WARNING: The tempo for track#%d has already been set! OLD=%d NEW=%d Skipping change...\n",
                                         trackNum, tempo, newTempo);
                             } else {
                                 tempo = newTempo;
@@ -373,31 +426,40 @@ public class Midi {
         return new MidiTrackParseResult(track, bytesRead);
     }
 
+    public List<List<MidiChunk.Event>> eventsByDt() {
+        return tracks.stream()
+                .flatMap(track -> track.events.stream())
+                .filter(event -> event.subType != MidiEventSubType.END_OF_TRACK)
+                .collect(Collectors.groupingBy(event -> event.ticks, TreeMap::new, Collectors.toList()))
+                .values()
+                .stream()
+                .toList();
+    }
+
     /**
      * Converts every track's events relative delta-times into absolute times in milliseconds
      * @return Every event sorted by absolute time in milliseconds
      */
     public List<List<MidiChunk.Event>> allEventsInAbsoluteTime() {
+        return updateAbsoluteTimes(-1).values().stream().toList();
+    }
+
+    public List<List<MidiChunk.Event>> allEventsInAbsoluteTime(long elapsedTime) {
+        return updateAbsoluteTimes(elapsedTime).values().stream().toList();
+    }
+
+    /**
+     * Converts every track's events relative delta-times into absolute times in milliseconds
+     * @return Every event sorted by absolute time in milliseconds
+     */
+    public TreeMap<Double, List<MidiChunk.Event>> updateAbsoluteTimes(long elapsedTime) {
         // convert track events in absolute time and keep in same internal order
         // but group all by absolute time
-        Map<Double, List<MidiChunk.Event>> eventsGroupedByAbsoluteTime = tracks.stream()
-                .flatMap(track -> track.eventsInAbsoluteTime(header.tickdiv).stream())
-                .toList()
-                .stream()
+        return tracks.stream()
+                .flatMap(track -> track.eventsInAbsoluteTime2(header.tickdiv, elapsedTime).stream())
+                .filter(event -> event.absoluteTime > elapsedTime)
                 .filter(event -> event.subType != MidiEventSubType.END_OF_TRACK)
-                .collect(Collectors.groupingBy(MidiChunk.Event::absoluteTime));
-
-        // Make sure that META events are always sent before the MIDI ones otherwise you occasionaly get strange notes in the begining
-        // Other events stay in the same relative position
-        for (var events : eventsGroupedByAbsoluteTime.entrySet()) {
-            events.getValue().sort(Comparator.comparingInt(e -> {
-                return e.type == MidiEventType.META || e.type == MidiEventType.SYSEX ? 0 : 1;
-            }));
-        }
-
-        // return only the chunks of events sorted by absolute time
-        List<Map.Entry<Double, List<MidiChunk.Event>>> entryList = new ArrayList<>(eventsGroupedByAbsoluteTime.entrySet());
-        return entryList.stream().sorted(Map.Entry.comparingByKey()).map(Map.Entry::getValue).toList();
+                .collect(Collectors.groupingBy(MidiChunk.Event::absoluteTime, TreeMap::new, Collectors.toList()));
     }
 
     /**
@@ -422,12 +484,12 @@ public class Midi {
     public sealed interface MidiChunk {
         /** A MidiHeader represents the header for a MIDI file */
         final class Header implements MidiChunk {
-            public MidiIdentifier id;
-            public int len;
-            public MidiFileFormat format;
-            public short ntracks;
-            public int tickdiv;
-            public boolean useMetricalTiming;
+            public final MidiIdentifier id;
+            public final int len;
+            public final MidiFileFormat format;
+            public final short ntracks;
+            public final int tickdiv;
+            public final boolean useMetricalTiming;
 
             private static final Map<Integer, MidiFileFormat> VALID_FORMATS = Map.of(
                     0, MidiFileFormat.FORMAT_0,
@@ -537,13 +599,16 @@ public class Midi {
 
         /** A MidiTrack is a sequence of time-ordered events. */
         final class Track implements MidiChunk {
-            public int trackNum;
-            public MidiIdentifier id;
-            public int len;
-            public List<Event> events;
+            public final int trackNum;
+            public final MidiIdentifier id;
+            public final int len;
+            public final List<Event> events;
             /** In microseconds per quarter-note */
-            public int tempo;
+            private volatile int tempo;
             public TimeSignature timeSignature;
+
+            public synchronized int getTempo() { return tempo; }
+            public synchronized void setTempo(int tempo) { this.tempo = tempo; }
 
             /**
              * Constructs and validates a Midi Track
@@ -585,7 +650,7 @@ public class Midi {
              * @param tickdiv Comes from the MIDI header
              * @return The track's events sorted by absolute time in milliseconds
              */
-            public List<Event> eventsInAbsoluteTime(int tickdiv) {
+            public List<Event> updateAbsoluteTimes(int tickdiv) {
                 double msPerTick = tempo / (double)tickdiv / 1000.0;
 
                 int t = 0;
@@ -593,6 +658,47 @@ public class Midi {
                 for (var event : events) {
                     t += event.ticks;
                     event.absoluteTime = t * msPerTick;
+                    eventsSortedByAbsoluteTime.add(event);
+                }
+
+                return eventsSortedByAbsoluteTime;
+            }
+
+            /** Does not modify the events. Makes a copy. */
+            public List<Event> eventsInAbsoluteTime(int tickdiv, long elapsedTime) {
+                double msPerTick = tempo / (double)tickdiv / 1000.0;
+
+                long t = 0;
+                List<Event> eventsCopy = new ArrayList<>(events);
+                List<Event> eventsSortedByAbsoluteTime = new ArrayList<>();
+                for (var event : eventsCopy) {
+//                    if (event.absoluteTime < elapsedTime) continue;
+                    t += event.ticks;
+                    event.absoluteTime = t * msPerTick;
+                    eventsSortedByAbsoluteTime.add(event);
+                }
+
+                return eventsSortedByAbsoluteTime;
+            }
+
+            /**
+             * Does not modify the events. Makes a copy.
+             * @param elapsedTime in milliseconds
+             * @return events after elapsedTime with absolute times per track tempo
+             */
+            public List<Event> eventsInAbsoluteTime2(int tickdiv, long elapsedTime) {
+                double msPerTick = tempo / (double)tickdiv / 1000.0;
+
+                long ticks = 0;
+//                List<Event> eventsCopy = new ArrayList<>(events);
+                List<Event> eventsSortedByAbsoluteTime = new ArrayList<>();
+                for (var event : events) {
+                    ticks += event.ticks;
+                    if (event.absoluteTime < elapsedTime) continue;
+
+                    // ticks caught up to elapsedTime, rest of ticks use new tempo/msPerTick
+//                    double newAbsoluteTime = event.absoluteTime +
+                    event.absoluteTime = ticks * msPerTick;
                     eventsSortedByAbsoluteTime.add(event);
                 }
 
@@ -626,28 +732,28 @@ public class Midi {
 
         class Event {
             /** One of the three main types of Events: MIDI, Meta, or Sysex */
-            public MidiEventType type;
+            public final MidiEventType type;
 
             /** Specifies the specific event */
-            public MidiEventSubType subType;
+            public final MidiEventSubType subType;
 
             /** The duration of the event in ticks */
-            public int ticks;
+            public final int ticks;
 
             /** The number of bytes used to store the ticks in the file. 1-4 bytes. */
-            public int tickBytes;
+            public final int tickBytes;
 
             /** The event's bytes */
-            public String message;
+            public final String message;
 
             /** If set, the message's status byte is the same the previous message and the receiver should assume it was the same as the last one. */
-            public boolean runningStatus;
+            public final boolean runningStatus;
 
             /** The byte where the data starts in the message */
-            private final int dataStart;
+            public final int dataStart;
 
             /** The byte length of the data in the message */
-            private final int dataLen;
+            public final int dataLen;
 
             /** Is not set until the track sets it */
             public double absoluteTime;

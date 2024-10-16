@@ -1,5 +1,6 @@
 package io.feydor.midi;
 
+import io.feydor.util.ByteFns;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;

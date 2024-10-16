@@ -1,4 +1,4 @@
-package io.feydor.midi;
+package io.feydor.util;
 
 import io.feydor.midi.exceptions.InvalidVarLenParseException;
 

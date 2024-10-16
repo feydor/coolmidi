@@ -1,6 +1,6 @@
 package io.feydor.midi;
 
-import io.feydor.midi.util.Pair;
+import io.feydor.util.Pair;
 
 /**
  * All supported io.feydor.Midi event types by status byte(s)

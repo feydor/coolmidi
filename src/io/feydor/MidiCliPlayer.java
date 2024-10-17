@@ -2,6 +2,7 @@ package io.feydor;
 
 import io.feydor.midi.Midi;
 import io.feydor.ui.*;
+import io.feydor.ui.impl.*;
 
 import javax.sound.midi.MidiSystem;
 import javax.sound.midi.MidiUnavailableException;
@@ -89,13 +90,14 @@ public final class MidiCliPlayer {
             System.out.println("Available devices: " + Arrays.toString(devices));
         }
 
-        MidiUi ui = switch (uiOption) {
-            case TUI_UI -> new MidiTuiUi();
-            case TRACKER_UI -> new MidiTrackerUi();
-            case STATUS_LINE_UI -> new MidiStatusLineUi();
-            case CHANNEL_UI -> new MidiChannelUi();
-            case NO_UI -> null;
-        };
+        MidiUi ui = new MidiGui();
+//        MidiUi ui = switch (uiOption) {
+//            case TUI_UI -> new MidiTuiUi();
+//            case TRACKER_UI -> new MidiTrackerUi();
+//            case STATUS_LINE_UI -> new MidiStatusLineUi();
+//            case CHANNEL_UI -> new MidiChannelUi();
+//            case NO_UI -> new MidiGui();
+//        };
 
         this.midiScheduler = new MidiScheduler(ui, playlist, MidiSystem.getReceiver(), verbose);
     }

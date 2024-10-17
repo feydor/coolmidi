@@ -1,7 +1,10 @@
-package io.feydor.ui;
+package io.feydor.ui.impl;
 
 import io.feydor.midi.Midi;
 import io.feydor.midi.MidiChannel;
+import io.feydor.ui.MidiUi;
+import io.feydor.ui.Terminal;
+import io.feydor.ui.TotalTime;
 
 import java.util.Timer;
 import java.util.TimerTask;
@@ -16,7 +19,7 @@ public class MidiStatusLineUi implements MidiUi {
     private static final String BG_OFF = "\033[0m";
 
     @Override
-    public void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime remainingTime) throws Exception {
+    public void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime remainingTime, MidiUiEventListener uiEventListener) throws Exception {
         var timer = new Timer();
         timer.scheduleAtFixedRate(new UiThread(remainingTime, timer), 0, UPDATE_PERIOD);
 

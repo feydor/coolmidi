@@ -2,6 +2,7 @@ package io.feydor.ui;
 
 import io.feydor.midi.Midi;
 import io.feydor.midi.MidiChannel;
+import io.feydor.ui.impl.MidiUiEventListener;
 
 import java.util.concurrent.Future;
 
@@ -13,5 +14,5 @@ public interface MidiUi {
      * @param channels A map from midi channel # to that channel's current value
      * @param remainingTime The time until the last event plays in absolute time
      */
-    void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime remainingTime) throws Exception;
+    void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime remainingTime, MidiUiEventListener uiEventListener) throws Exception;
 }

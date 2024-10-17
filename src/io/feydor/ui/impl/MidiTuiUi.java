@@ -1,16 +1,17 @@
-package io.feydor.ui;
+package io.feydor.ui.impl;
 
 import io.feydor.midi.Midi;
 import io.feydor.midi.MidiChannel;
+import io.feydor.ui.MidiUi;
+import io.feydor.ui.TotalTime;
 
-import java.util.Map;
 import java.util.concurrent.Future;
 
 public class MidiTuiUi implements MidiUi {
     private final static String[] NOTES = new String[]{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 
     @Override
-    public void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime timeUntilLastEvent) throws Exception {
+    public void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime timeUntilLastEvent, MidiUiEventListener uiEventListener) throws Exception {
         // Display the UI while the playing thread sleeps
         nowPlayingUi(midi, channels, timeUntilLastEvent, playbackThread);
     }

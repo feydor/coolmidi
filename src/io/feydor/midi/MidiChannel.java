@@ -1,5 +1,13 @@
 package io.feydor.midi;
 
+import io.feydor.ui.impl.ChannelListener;
+import io.feydor.util.JsonIo;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * The current state of a single MIDI channel
  */
@@ -18,6 +26,29 @@ public class MidiChannel {
 
     public static final int CONTROLLER_VOLUME = 7;
     public static final int CONTROLLER_PAN = 10;
+    private static final Map<Byte, String> GM_PROGRAM_TO_NAME = new HashMap<>();
+    private static final Map<String, Byte> GM_NAME_TO_PROGRAM = new HashMap<>();
+    private final List<ChannelListener> channelListeners = new ArrayList<>();
+
+    // Populate GM program names map using csv file
+    static {
+        Map<String, Object> instrumentMenu = JsonIo.getGmMidiJsonStringMap();
+        int count = 0;
+        for (var entry : instrumentMenu.entrySet()) {
+            if (entry.getValue() instanceof List instrNames) {
+                for (Object name : instrNames) {
+                    GM_PROGRAM_TO_NAME.put((byte) ++count, (String)name);
+                }
+            } else {
+                throw new RuntimeException("Not a list: " + entry.getValue());
+            }
+        }
+
+        for (var entry : GM_PROGRAM_TO_NAME.entrySet()) {
+            GM_NAME_TO_PROGRAM.put(entry.getValue(), entry.getKey());
+        }
+    }
+
 
     public MidiChannel(int channel, boolean used) {
         if (channel < 1 || channel > 16)
@@ -26,6 +57,10 @@ public class MidiChannel {
         this.controllers = new byte[128]; // MIDI CC 120 to 127 are “Channel Mode Messages.”
         this.polyphonicPressure = new byte[128];
         this.used = used;
+    }
+
+    public static byte gmProgramNameToByte(String programName) {
+        return GM_NAME_TO_PROGRAM.get(programName);
     }
 
     /** Set pressure for note */
@@ -55,6 +90,7 @@ public class MidiChannel {
 
     public void setProgram(byte program) {
         this.program = program;
+        channelListeners.forEach(listener -> listener.changed(channel));
     }
 
     public void setPitchBend(int pitchBend) {
@@ -83,6 +119,10 @@ public class MidiChannel {
         };
     }
 
+    public String getCurrentGmProgramName() {
+        return GM_PROGRAM_TO_NAME.get(program);
+    }
+
     @Override
     public String toString() {
         return "MidiChannel{" +
@@ -96,5 +136,9 @@ public class MidiChannel {
                 ", pitchBend=" + pitchBend +
                 ", pressure=" + pressure +
                 '}';
+    }
+
+    public void addChangeListener(ChannelListener channelListener) {
+        channelListeners.add(channelListener);
     }
 }

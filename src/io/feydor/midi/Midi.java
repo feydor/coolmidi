@@ -849,6 +849,10 @@ public class Midi {
                 return absoluteTime;
             }
 
+            public void setAbsoluteTime(double absoluteTime) {
+                this.absoluteTime = absoluteTime;
+            }
+
             /**
              * The hexadecimal contents in the same format as Unix hexdump
              */

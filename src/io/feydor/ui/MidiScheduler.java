@@ -2,6 +2,7 @@ package io.feydor.ui;
 
 import io.feydor.midi.*;
 import io.feydor.midi.MidiChannel;
+import io.feydor.ui.impl.MidiUiEventListener;
 import io.feydor.util.ByteFns;
 
 import javax.sound.midi.*;
@@ -42,20 +43,23 @@ public class MidiScheduler {
 
                 // Start playback in a new thread which will update the channel map and the time remaining
                 // and then sleep until the last event in the file
-//                var eventBatches = midi.allEventsInAbsoluteTime();
-//                TotalTime timeUntilLastEvent = new TotalTime(eventBatches.get(eventBatches.size()-1).get(0).absoluteTime);
+                MidiUiEventListener midiUiEventListener = new MidiUiEventListener();
+                var eventBatches = midi.allEventsInAbsoluteTime();
+                TotalTime timeUntilLastEvent = new TotalTime(eventBatches.get(eventBatches.size()-1).get(0).absoluteTime);
                 List<Callable<Object>> scheduledThreads = new ArrayList<>(midi.numTracks());
                 for (var track : midi.getTracks()) {
                     scheduledThreads.add(Executors.callable(() -> {
                         try {
-                            scheduleTrack(midi, track, channels);
+                            scheduleTrack(midi, track, channels, midiUiEventListener);
                         } catch (Exception e) {
                             e.printStackTrace();
                         }
                     }));
                 }
-                var futures = executor.invokeAll(scheduledThreads);
 
+                ui.block(midi, null, channels, timeUntilLastEvent, midiUiEventListener);
+
+                var futures = executor.invokeAll(scheduledThreads);
                 // Display UI while playing thread
 
                 // block until all tracks completed
@@ -64,10 +68,11 @@ public class MidiScheduler {
                 }
 
                 // Display the UI while the playing thread sleeps
-//                var schedulerThread = scheduledThreads.get(scheduledThreads.size()-1);
+//                Callable<Object> schedulerThread = futures.
 //                if (ui != null) {
 //                    ui.block(midi, schedulerThread, channels, timeUntilLastEvent);
-//                } else {
+//                }
+//                else {
 //                    while (!schedulerThread.isDone());
 //                }
             }
@@ -78,7 +83,7 @@ public class MidiScheduler {
         System.exit(0);
     }
 
-    private void scheduleTrack(Midi midi, Midi.MidiChunk.Track track, MidiChannel[] channels) throws Exception {
+    private void scheduleTrack(Midi midi, Midi.MidiChunk.Track track, MidiChannel[] channels, MidiUiEventListener uiEventListener) throws Exception {
         long ticks = 0;
         long time = 0;
         long processingTime = 0;
@@ -86,7 +91,8 @@ public class MidiScheduler {
         for (int i=0; i <track.events.size(); ++i) {
             var event = track.events.get(i);
             double elapsedTime = event.ticks * midi.msPerTick();
-            Thread.sleep((long)elapsedTime);
+            long eventLapsedTime = handleEvents(uiEventListener, channels, time);
+            Thread.sleep((long)elapsedTime + eventLapsedTime);
             ticks += event.ticks;
             time += (long)elapsedTime;
 
@@ -106,6 +112,17 @@ public class MidiScheduler {
 
             sendEvent(event, channels);
         }
+    }
+
+    /**
+     * @return elapsed time in ms
+     */
+    private long handleEvents(MidiUiEventListener uiEventListener, MidiChannel[] channels, long absoluteTime) {
+        long start = System.nanoTime();
+        Midi.MidiChunk.Event event = uiEventListener.getEventOrNull(absoluteTime);
+        if (event != null)
+            sendEvent(event, channels);
+        return (System.nanoTime() - start) / 1_000_000;
     }
 
     private void sendEvent(Midi.MidiChunk.Event event, MidiChannel[] channels) {
@@ -232,6 +249,9 @@ public class MidiScheduler {
         return switch (event.type) {
             case MIDI -> {
                 var parsed = event.parseAsChannelMidiEvent();
+                if (event.subType == MidiEventSubType.PROGRAM_CHANGE) {
+                    System.out.println("PROGRAM_CHANGE event = " + parsed + " msg = " + event.message);
+                }
                 updateChannels(event, parsed, channels);
                 yield new ShortMessage(parsed.cmd(), parsed.channel(), parsed.data1(), parsed.data2());
             }
@@ -268,7 +288,9 @@ public class MidiScheduler {
                 int pitch = (parsed.data2() << 7) | parsed.data1();
                 channel.setPitchBend(pitch);
             }
-            case PROGRAM_CHANGE -> channel.setProgram((byte) parsed.data1());
+            case PROGRAM_CHANGE -> {
+                channel.setProgram((byte) parsed.data1());
+            }
             case CHANNEL_PRESSURE -> channel.setPressure((byte) parsed.data1());
             case CONTROLLER -> channel.setController((byte) parsed.data1(), (byte) parsed.data2());
         }

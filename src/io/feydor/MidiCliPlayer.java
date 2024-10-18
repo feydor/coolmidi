@@ -78,7 +78,6 @@ public final class MidiCliPlayer {
                 .toList();
 
         if (!playlist.isEmpty()) {
-            if (verbose) System.out.printf("Parsed %d MIDI files\n", playlist.size());
             playlist = new ArrayList<>(playlist);
             Collections.shuffle(playlist);
         }
@@ -86,8 +85,7 @@ public final class MidiCliPlayer {
         // Get the default MIDI device and its receiver
         if (verbose) {
             var devices = MidiSystem.getMidiDeviceInfo();
-            System.out.println("# of devices: " + devices.length);
-            System.out.println("Available devices: " + Arrays.toString(devices));
+            System.out.printf("INFO: Available devices (%d): %s\n", devices.length, Arrays.toString(devices));
         }
 
         MidiUi ui = new MidiGui();

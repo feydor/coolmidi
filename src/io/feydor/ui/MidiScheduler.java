@@ -31,15 +31,16 @@ public class MidiScheduler {
         // ii. Sequence and play the file in a new thread, passing in the channels map to keep track of note values
         // iii. In the thread, display the UI
         do {
-            for (Midi midi : playlist) {
-                System.out.println("Playing: " + midi.filename);
+            for (int i = 0; i < playlist.size(); ++i) {
+                Midi midi = playlist.get(i);
+                System.out.println("INFO: Playing: " + midi.filename);
                 MidiChannel[] channels = new MidiChannel[16];
-                for (int i=0; i<16; ++i) {
-                    channels[i] = new MidiChannel(i+1, midi.channelsUsed[i]);
+                for (int j = 0; j < 16; ++j) {
+                    channels[j] = new MidiChannel(j+1, midi.channelsUsed[j]);
                 }
 
                 if (verbose)
-                    System.out.println("# of channels used: " + Arrays.stream(channels).mapToInt(ch -> ch.used ? 1 : 0).sum());
+                    System.out.println("INFO: # of channels used: " + Arrays.stream(channels).mapToInt(ch -> ch.used ? 1 : 0).sum());
 
                 // Start playback in a new thread which will update the channel map and the time remaining
                 // and then sleep until the last event in the file
@@ -67,6 +68,11 @@ public class MidiScheduler {
                     f.get();
                 }
 
+                if (midiUiEventListener.isLoopingOn()) {
+                    if (verbose) System.out.println("Looping...");
+                    i--;
+                }
+
                 // Display the UI while the playing thread sleeps
 //                Callable<Object> schedulerThread = futures.
 //                if (ui != null) {
@@ -86,32 +92,37 @@ public class MidiScheduler {
     private void scheduleTrack(Midi midi, Midi.MidiChunk.Track track, MidiChannel[] channels, MidiUiEventListener uiEventListener) throws Exception {
         long ticks = 0;
         long time = 0;
-        long processingTime = 0;
 
-        for (int i=0; i <track.events.size(); ++i) {
+        for (int i=0; i < track.events.size(); ++i) {
             var event = track.events.get(i);
             double elapsedTime = event.ticks * midi.msPerTick();
-            long eventLapsedTime = handleEvents(uiEventListener, channels, time);
-            Thread.sleep((long)elapsedTime + eventLapsedTime);
+            double eventLapsedTime = handleEvents(uiEventListener, channels, time);
+            busySleep((long)((elapsedTime + eventLapsedTime) * 1_000_000.0));
             ticks += event.ticks;
             time += (long)elapsedTime;
 
             if (event.subType == MidiEventSubType.SET_TEMPO) {
-                // handle global tempo change
                 int newTempo = Integer.parseUnsignedInt(event.message.substring(6), 16);
-//                midi.updateGlobalTempo(newTempo);
-                System.out.printf("Detected unsupported SET_TEMPO event with newTempo=%d with trknum=%d @ time=%d, ticks=%d, globalTempo=%d\n", newTempo, track.trackNum, time, ticks, midi.getTracks().get(1).getTempo());
+                System.out.printf("WARN: Encountered SET_TEMPO event @time=%d! currentGlobalTempo=%s, newTempo=%d, trackNum=%d\n", time, midi.getTracks().get(1).getTempo(), newTempo, track.trackNum);
+                midi.updateGlobalTempo(newTempo);
             } else if (event.subType == MidiEventSubType.TIME_SIGNATURE) {
-                System.out.println("WARNING: Encountered TIME_SIGNATURE change! " + event);
+                System.out.printf("WARN: Encountered TIME_SIGNATURE change! oldTimeSig=%s, event=%s\n", midi.getTracks().get(0).timeSignature, event);
             } else if (event.subType == MidiEventSubType.MARKER) {
-//                System.out.println("WARNING: Encountered MARKER! " + event);
                 byte[] msgBytes = ByteFns.fromHex(event.message.substring(event.dataStart * 2, (event.dataStart + event.dataLen)*2));
                 String msg = ByteFns.toAscii(msgBytes);
-                System.out.println(msg);
+                System.out.println("WARN: Encountered MARKER! " + event);
             }
 
             sendEvent(event, channels);
         }
+    }
+
+    public static void busySleep(long nanos) {
+        long elapsed;
+        final long startTime = System.nanoTime();
+        do {
+            elapsed = System.nanoTime() - startTime;
+        } while (elapsed < nanos);
     }
 
     /**
@@ -122,7 +133,7 @@ public class MidiScheduler {
         Midi.MidiChunk.Event event = uiEventListener.getEventOrNull(absoluteTime);
         if (event != null)
             sendEvent(event, channels);
-        return (System.nanoTime() - start) / 1_000_000;
+        return (long) ((System.nanoTime() - start) / 1_000_000.0);
     }
 
     private void sendEvent(Midi.MidiChunk.Event event, MidiChannel[] channels) {
@@ -249,9 +260,6 @@ public class MidiScheduler {
         return switch (event.type) {
             case MIDI -> {
                 var parsed = event.parseAsChannelMidiEvent();
-                if (event.subType == MidiEventSubType.PROGRAM_CHANGE) {
-                    System.out.println("PROGRAM_CHANGE event = " + parsed + " msg = " + event.message);
-                }
                 updateChannels(event, parsed, channels);
                 yield new ShortMessage(parsed.cmd(), parsed.channel(), parsed.data1(), parsed.data2());
             }

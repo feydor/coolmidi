@@ -37,7 +37,8 @@ public class MidiChannel {
         for (var entry : instrumentMenu.entrySet()) {
             if (entry.getValue() instanceof List instrNames) {
                 for (Object name : instrNames) {
-                    GM_PROGRAM_TO_NAME.put((byte) ++count, (String)name);
+                    GM_PROGRAM_TO_NAME.put((byte)(count & 0xff), (String)name);
+                    count++;
                 }
             } else {
                 throw new RuntimeException("Not a list: " + entry.getValue());
@@ -59,7 +60,7 @@ public class MidiChannel {
         this.used = used;
     }
 
-    public static byte gmProgramNameToByte(String programName) {
+    public static short gmProgramNameToByte(String programName) {
         return GM_NAME_TO_PROGRAM.get(programName);
     }
 
@@ -89,6 +90,8 @@ public class MidiChannel {
     }
 
     public void setProgram(byte program) {
+        if (program < 0)
+            throw new RuntimeException("New program must be bewtween 0 and 127 (inclusive): " + program);
         this.program = program;
         channelListeners.forEach(listener -> listener.changed(channel));
     }

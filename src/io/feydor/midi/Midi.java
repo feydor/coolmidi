@@ -64,7 +64,7 @@ public class Midi {
             throw new MidiParseException("File not found!: " + filename);
         }
 
-        logDebug("Starting to parse " + filename);
+        logDebug("Starting to parse " + filename + "...");
 
         // Now start parsing the Header chunk
         header = MidiChunk.Header.readFrom(file);
@@ -104,7 +104,7 @@ public class Midi {
 
         if (file.available() > 1) {
             byte[] remaining = file.readAllBytes();
-            logDebug("WARNING: We didn't reach the EoF and apparently there is still some bytes left over after track parsing. "
+            logDebug("WARN: We didn't reach the EoF and apparently there is still some bytes left over after track parsing. "
                     + "So here's the rest of the bytes: " + ByteFns.toHex(remaining));
         }
 
@@ -120,8 +120,8 @@ public class Midi {
             throw new IllegalStateException("Only Format 1 MIDI files have a global tempo");
         }
 
-        for (var track : tracks) {
-            track.setTempo(newTempo);
+        synchronized (this) {
+            tracks.get(0).setTempo(newTempo);
         }
     }
 
@@ -147,7 +147,7 @@ public class Midi {
             throw new IllegalStateException("Only Format 1 MIDI files have a global tempo");
         }
 
-        return tracks.get(0).getTempo() / (double)header.tickdiv / 1000.0;
+        return (tracks.get(0).getTempo() / (double)header.tickdiv) / 1000.0;
     }
 
     /** Returns an unmodifiable view of the tracks */
@@ -244,7 +244,7 @@ public class Midi {
                             file.skipNBytes(1); // skip the 04
                             byte[] timeSig = file.readNBytes(4);
                             if ((timeSig[3] & 0xFF) != 0x08) {
-                                logDebug("WARNING: A Time Signature event (%s) is specifying a # of 32nd notes in a" +
+                                logDebug("WARN: A Time Signature event (%s) is specifying a # of 32nd notes in a" +
                                                 "MIDI quarter-note (%02x) that is NOT supported by my parser, for now...\n",
                                         "FF5804" + ByteFns.toHex(timeSig), timeSig[3] & 0xFF);
                             }
@@ -254,7 +254,7 @@ public class Midi {
                             var newTimeSig = new MidiChunk.TimeSignature(timeSig[0] & 0xFF, timeSig[1] & 0xFF,
                                     timeSig[2] & 0xFF, timeSig[3] & 0xFF);
                             if (timeSignatureSet) {
-                                logDebug("WARNING: The time signature for track#%d has already been set! Skipping... "
+                                logWarn("The time signature for track#%d has already been set! Skipping... "
                                                 + "OLD=%s NEW=%s\n", trackNum, timeSignature, newTimeSig);
                             } else {
                                 timeSignature = newTimeSig;
@@ -274,7 +274,7 @@ public class Midi {
                             // Setting the tempo of the track (and for format_1 all of the tracks) as the first SET_TEMPO event encountered
                             // TODO: This is arbitrary but I will need to come up with a way to set each track'scurrent tempo dynamically at runtime
                             if (tempoSet) {
-                                logDebug("WARNING: The tempo for track#%d has already been set! OLD=%d NEW=%d Skipping change...\n",
+                                logDebug("WARN: The tempo for track#%d has already been set! OLD=%d NEW=%d Skipping change...\n",
                                         trackNum, tempo, newTempo);
                             } else {
                                 tempo = newTempo;
@@ -415,7 +415,7 @@ public class Midi {
         if (header.format == MidiFileFormat.FORMAT_1 && trackNum > 1) {
             var timingRelatedEvents = events.stream().filter(e -> e.subType.isTimingRelated()).toList();
             if (!timingRelatedEvents.isEmpty()) {
-                String msg = String.format("WARNING: In a format 1 Midi file, track#2+ must NOT have any timing related Meta Events," +
+                String msg = String.format("WARN: In a format 1 Midi file, track#2+ must NOT have any timing related Meta Events," +
                         "but timing related Meta events were encountered!\n" +
                         "track#=%d, bytesRead=%d, timing related events=%s", trackNum, bytesRead, timingRelatedEvents);
                 logDebug(msg);
@@ -608,7 +608,7 @@ public class Midi {
             public TimeSignature timeSignature;
 
             public synchronized int getTempo() { return tempo; }
-            public synchronized void setTempo(int tempo) { this.tempo = tempo; }
+            public void setTempo(int tempo) { this.tempo = tempo; }
 
             /**
              * Constructs and validates a Midi Track
@@ -865,10 +865,14 @@ public class Midi {
     }
 
     private void logDebug(String msg) {
-        if (verbose) System.out.println(msg);
+        if (verbose) System.out.println("INFO: " + msg);
     }
 
     private void logDebug(String format, Object ... args) {
-        if (verbose) System.out.printf(format, args);
+        if (verbose) System.out.printf("INFO: " + format, args);
+    }
+
+    private void logWarn(String format, Object ... args) {
+        if (verbose) System.out.printf("WARN: " + format, args);
     }
 }

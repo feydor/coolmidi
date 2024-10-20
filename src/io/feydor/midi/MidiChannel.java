@@ -91,9 +91,12 @@ public class MidiChannel {
 
     public void setProgram(byte program) {
         if (program < 0)
-            throw new RuntimeException("New program must be bewtween 0 and 127 (inclusive): " + program);
-        this.program = program;
-        channelListeners.forEach(listener -> listener.changed(channel));
+            throw new RuntimeException("New program must be between 0 and 127 (inclusive): " + program);
+
+        if (this.program != program) {
+            this.program = program;
+            channelListeners.forEach(listener -> listener.changed(channel));
+        }
     }
 
     public void setPitchBend(int pitchBend) {

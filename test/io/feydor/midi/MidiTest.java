@@ -19,7 +19,7 @@ class MidiTest {
         assertEquals(0x00000006, midi.header.len);
         assertEquals(MidiFileFormat.FORMAT_1, midi.header.format);
         assertEquals(0x000d, midi.header.ntracks);
-        assertTrue(midi.header.useMetricalTiming);
+        assertTrue(midi.header.useTicksPerBeatTimeDiv);
         assertEquals(0x01e0, midi.header.tickdiv);
     }
 
@@ -135,7 +135,7 @@ class MidiTest {
         assertEquals(0x00000006, midi.header.len);
         assertEquals(MidiFileFormat.FORMAT_0, midi.header.format);
         assertEquals(0x0001, midi.header.ntracks);
-        assertTrue(midi.header.useMetricalTiming);
+        assertTrue(midi.header.useTicksPerBeatTimeDiv);
         assertEquals(0x060, midi.header.tickdiv);
 
         assertEquals(1, midi.getTracks().size());
@@ -149,7 +149,7 @@ class MidiTest {
         Midi midi = new Midi("test/resources/midi_test-c-major-scale.mid");
         assertEquals(MidiFileFormat.FORMAT_0, midi.header.format);
         assertEquals(0x0001, midi.header.ntracks);
-        assertTrue(midi.header.useMetricalTiming);
+        assertTrue(midi.header.useTicksPerBeatTimeDiv);
         assertEquals(0x060, midi.header.tickdiv);
 
         var track = midi.getTracks().get(0);
@@ -161,7 +161,7 @@ class MidiTest {
         Midi midi = new Midi("test/resources/midi_test-all-gm-percussion.mid");
         assertEquals(MidiFileFormat.FORMAT_0, midi.header.format);
         assertEquals(0x0001, midi.header.ntracks);
-        assertTrue(midi.header.useMetricalTiming);
+        assertTrue(midi.header.useTicksPerBeatTimeDiv);
         assertEquals(0x060, midi.header.tickdiv);
 
         var track = midi.getTracks().get(0);

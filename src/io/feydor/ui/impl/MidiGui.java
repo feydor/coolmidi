@@ -1,6 +1,5 @@
 package io.feydor.ui.impl;
 
-import com.formdev.flatlaf.FlatIntelliJLaf;
 import io.feydor.midi.Midi;
 import io.feydor.midi.MidiChannel;
 import io.feydor.ui.MidiUi;
@@ -8,11 +7,9 @@ import io.feydor.ui.TotalTime;
 import io.feydor.util.JsonIo;
 
 import javax.swing.*;
+import javax.swing.border.BevelBorder;
 import java.awt.*;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.util.ArrayList;
-import java.util.Arrays;
+import java.io.File;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
@@ -36,7 +33,7 @@ public class MidiGui implements MidiUi, ChannelListener {
 
         frame.setSize(300,800);
 
-        JPanel mainPanel = new JPanel(new GridLayout(channels.length + 3, 1));
+        JPanel mainPanel = new JPanel(new GridLayout(channels.length + 3, 1, 25, 0));
 
         // First column, channel controls
         this.channels = channels;
@@ -44,28 +41,35 @@ public class MidiGui implements MidiUi, ChannelListener {
         for (int i = 0; i < channels.length; ++i) {
             channels[i].addChangeListener(this);
 
-            JPanel rowPanel = new JPanel(new GridLayout(2, 1)); // new FlowLayout(FlowLayout.LEFT)
+            JPanel rowPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
             rowPanel.add(createMuteButton(channels[i]));
-            programMenus[i] = createProgramMenu(channels[i].getCurrentGmProgramName(), i);
+            programMenus[i] = createProgramMenu(channels[i]);
             rowPanel.add(programMenus[i]);
             rowPanel.add(new JSlider(JSlider.HORIZONTAL, 0, 100, 50)); // TODO: volume slider
             mainPanel.add(rowPanel);
         }
 
         // Second column, misc sliders
-        mainPanel.add(new JLabel(String.format("Tempo %.2f (ms/tick), %d bpm", midi.msPerTick(), 60_000_000 / midi.getTracks().get(0).getTempo())));
+        mainPanel.add(new JLabel(String.format("Tempo %.2f (ms/tick), %d bpm", midi.msPerTick(),
+                60_000_000 / midi.getTracks().get(0).getTempo())));
 //        mainPanel.add(new JLabel("Song Length"));
 //        mainPanel.add(new JSlider(JSlider.HORIZONTAL, 0, 100, 0));
         var checkbox = new JCheckBox("Loop?");
         checkbox.addActionListener(event -> uiEventListener.toggleLoop());
         mainPanel.add(checkbox);
+        var songBar = new JTextField((new File(midi.filename).getName()));
+        songBar.setEditable(false);
+        songBar.setBorder(new BevelBorder(BevelBorder.LOWERED));
+        mainPanel.add(songBar);
 
         frame.add(mainPanel);
         frame.setVisible(true);
     }
 
     private JToggleButton createMuteButton(MidiChannel channel) {
-        var button = new JToggleButton(String.valueOf(channel.channel));
+        var button = new JToggleButton(String.format("%02d", channel.channel));
+        if (!channel.used)
+            button.setEnabled(false);
         button.addActionListener(e -> {
             if (button.isSelected()) {
                 uiEventListener.addChannelVolumeEvent((byte)(channel.channel - 1), (byte)0x00);
@@ -76,10 +80,11 @@ public class MidiGui implements MidiUi, ChannelListener {
         return button;
     }
 
-    private JMenuBar createProgramMenu(String initialInstrumentName, int index) {
+    private JMenuBar createProgramMenu(MidiChannel midiChannel) {
         Map<String, Object> menuMap = JsonIo.getGmMidiJsonStringMap();
         JMenuBar menuBar = new JMenuBar();
-        JMenu rootMenu = new JMenu(initialInstrumentName == null ? " ".repeat(DROPDOWN_CHAR_WIDTH) : initialInstrumentName);
+        String initialInstrumentName = midiChannel.used ? midiChannel.getCurrentGmProgramName() : " ".repeat(DROPDOWN_CHAR_WIDTH);
+        JMenu rootMenu = new JMenu(initialInstrumentName);
         menuBar.add(rootMenu);
         for (var entrySet : menuMap.entrySet()) {
             String groupName = entrySet.getKey();
@@ -90,7 +95,6 @@ public class MidiGui implements MidiUi, ChannelListener {
                     menuItem.addActionListener(e -> {
                         JMenuItem thisMenuItem = (JMenuItem) e.getSource();
                         rootMenu.setText(thisMenuItem.getText());
-                        MidiChannel midiChannel = channels[index];
                         uiEventListener.addProgramChangeEvent((byte) (midiChannel.channel - 1), MidiChannel.gmProgramNameToByte(thisMenuItem.getText()));
                     });
                     groupMenu.add(menuItem);
@@ -153,7 +157,7 @@ public class MidiGui implements MidiUi, ChannelListener {
 
     private static void initLookAndFeel() {
         try {
-            UIManager.setLookAndFeel(new FlatIntelliJLaf());
+            UIManager.setLookAndFeel("com.sun.java.swing.plaf.motif.MotifLookAndFeel");
         } catch (Exception ex) {
             System.err.println(ex.getLocalizedMessage());
             ex.printStackTrace(System.err);

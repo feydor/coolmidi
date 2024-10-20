@@ -147,8 +147,27 @@ public class Midi {
             throw new IllegalStateException("Only Format 1 MIDI files have a global tempo");
         }
 
+        if (!header.useTicksPerBeatTimeDiv)
+            throw new UnsupportedOperationException("Cannot yet schedule MIDIs with \"frames per second\" time division");
+
         return (tracks.get(0).getTempo() / (double)header.tickdiv) / 1000.0;
     }
+
+    /**
+     * Current microseconds per tick for the MIDI file
+     * @throws IllegalStateException When this MIDI files is not in format 1
+     */
+    public double microsPerTick() {
+        if (header.format != MidiFileFormat.FORMAT_1) {
+            throw new IllegalStateException("Only Format 1 MIDI files have a global tempo");
+        }
+
+        if (!header.useTicksPerBeatTimeDiv)
+            throw new UnsupportedOperationException("Cannot yet schedule MIDIs with \"frames per second\" time division");
+
+        return tracks.get(0).getTempo() / (double)header.tickdiv;
+    }
+
 
     /** Returns an unmodifiable view of the tracks */
     public List<MidiChunk.Track> getTracks() {
@@ -488,8 +507,10 @@ public class Midi {
             public final int len;
             public final MidiFileFormat format;
             public final short ntracks;
+            /** 2 byte value representing the time division. See, {@link #useTicksPerBeatTimeDiv}*/
             public final int tickdiv;
-            public final boolean useMetricalTiming;
+            /** Used to interpret the tickdiv. If true then, tickdiv bytes represents "ticks per beat" ("per quarter note"). Otherwise they represent "frames per second" */
+            public final boolean useTicksPerBeatTimeDiv;
 
             private static final Map<Integer, MidiFileFormat> VALID_FORMATS = Map.of(
                     0, MidiFileFormat.FORMAT_0,
@@ -540,15 +561,12 @@ public class Midi {
                     throw new MidiInvalidHeaderException("A format 1 or 2 Midi Header chunk must have more than have one or more tracks! Given: " + ntracks);
                 }
 
-                // Based on the MSB of tickdiv, set useMetricalTiming
-                var msbSet = ((tickdiv[0] >> 7) & 0x0001) == 1;
-
                 this.id = MidiIdentifier.MThd;
                 this.len = len;
                 this.format = validatedFormat.get();
                 this.ntracks = ntracks;
                 this.tickdiv = ByteFns.toUnsignedShort(tickdiv);
-                this.useMetricalTiming = !msbSet;
+                this.useTicksPerBeatTimeDiv = ((tickdiv[0] >> 7) & 0x0001) == 0; // MSB of tickdiv determines time division method
             }
 
             /**
@@ -590,7 +608,7 @@ public class Midi {
                         ", format=" + format +
                         ", ntracks=" + ntracks +
                         ", tickdiv=" + tickdiv +
-                        ", useMetricalTiming=" + useMetricalTiming +
+                        ", useMetricalTiming=" + useTicksPerBeatTimeDiv +
                         '}';
             }
         }

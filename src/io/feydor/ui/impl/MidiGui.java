@@ -4,6 +4,7 @@ import io.feydor.midi.Midi;
 import io.feydor.midi.MidiChannel;
 import io.feydor.ui.MidiController;
 import io.feydor.ui.MidiUi;
+import io.feydor.ui.impl.gui.PianoRollModel;
 import io.feydor.util.JsonIo;
 
 import javax.swing.*;
@@ -15,11 +16,11 @@ import java.util.Map;
 
 public class MidiGui implements MidiUi {
     private JFrame frame;
-//    private MidiChannel[] channels;
     private JMenuBar[] programMenus;
+    private PianoRollModel[] pianoRollModels;
+    private JLabel tempoLabel;
     private MidiController midiController;
     private volatile boolean isListeningForChannelEvents;
-    private static final int DROPDOWN_CHAR_WIDTH = 44;
 
     @Override
     public void block(Midi midi, MidiController midiController) {
@@ -35,27 +36,40 @@ public class MidiGui implements MidiUi {
 
         var channels = midiController.getChannels();
         JPanel mainPanel = new JPanel(new GridLayout(channels.length + 3, 1, 25, 0));
+        mainPanel.setBorder(new BevelBorder(BevelBorder.RAISED));
 
         // First column, channel controls
         this.programMenus = new JMenuBar[channels.length];
+        this.pianoRollModels = new PianoRollModel[channels.length];
         for (int i = 0; i < channels.length; ++i) {
-            JPanel rowPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+            JPanel rowPanel = new JPanel();
+            rowPanel.setLayout(new BoxLayout(rowPanel, BoxLayout.X_AXIS));
             rowPanel.add(createMuteButton(channels[i]));
             programMenus[i] = createProgramMenu(channels[i]);
             rowPanel.add(programMenus[i]);
-            rowPanel.add(new JSlider(JSlider.HORIZONTAL, 0, 100, 50)); // TODO: volume slider
+
+            pianoRollModels[i] = new PianoRollModel();
+            var progBar = new JProgressBar(pianoRollModels[i]);
+            progBar.setMaximumSize(new Dimension(100, 100));
+//            progBar.setBorder(BorderFactory.createCompoundBorder(
+//                    BorderFactory.createLineBorder(Color.green),
+//                    progBar.getBorder()));
+            rowPanel.add(progBar);
+
+//            rowPanel.add(new JSlider(JSlider.HORIZONTAL, 0, 100, 50)); // TODO: volume slider
             mainPanel.add(rowPanel);
         }
 
         // Second column, misc sliders
-        mainPanel.add(new JLabel(String.format("Tempo %.2f (ms/tick), %d bpm", midi.msPerTick(),
-                60_000_000 / midi.getTracks().get(0).getTempo())));
+        tempoLabel = new JLabel(String.format("Tempo: %.2f (ms/tick), %d bpm", midi.msPerTick(),
+                60_000_000 / midi.getTracks().get(0).getTempo()));
+        mainPanel.add(tempoLabel);
 //        mainPanel.add(new JLabel("Song Length"));
 //        mainPanel.add(new JSlider(JSlider.HORIZONTAL, 0, 100, 0));
         var checkbox = new JCheckBox("Loop?");
         checkbox.addActionListener(event -> midiController.toggleCurrentMidiLooping());
         mainPanel.add(checkbox);
-        var songBar = new JTextField((new File(midi.filename).getName()));
+        var songBar = new JTextField("Now playing: " + (new File(midi.filename).getName()));
         songBar.setEditable(false);
         songBar.setBorder(new BevelBorder(BevelBorder.LOWERED));
         mainPanel.add(songBar);
@@ -69,6 +83,7 @@ public class MidiGui implements MidiUi {
 
     private JToggleButton createMuteButton(MidiChannel channel) {
         var button = new JToggleButton(String.format("%02d", channel.channel));
+        button.setMaximumSize(new Dimension(55, 55));
         if (!channel.used)
             button.setEnabled(false);
         button.addActionListener(e -> {
@@ -85,8 +100,10 @@ public class MidiGui implements MidiUi {
     private JMenuBar createProgramMenu(MidiChannel midiChannel) {
         Map<String, Object> menuMap = JsonIo.getGmMidiJsonStringMap();
         JMenuBar menuBar = new JMenuBar();
-        String initialInstrumentName = midiChannel.used ? midiChannel.getCurrentGmProgramName() : " ".repeat(DROPDOWN_CHAR_WIDTH);
+        menuBar.setPreferredSize(new Dimension(200, 200));
+        String initialInstrumentName = midiChannel.used ? midiChannel.getCurrentGmProgramName() : "";
         JMenu rootMenu = new JMenu(initialInstrumentName);
+        rootMenu.setPreferredSize(new Dimension(200, 200));
         menuBar.add(rootMenu);
         for (var entrySet : menuMap.entrySet()) {
             String groupName = entrySet.getKey();
@@ -120,9 +137,22 @@ public class MidiGui implements MidiUi {
                         String newProgramName = event.channel().getCurrentGmProgramName();
                         String oldProgramName = programMenus[event.channel().channel - 1].getMenu(0).getText();
                         if (!newProgramName.equals(oldProgramName)) {
-                            newProgramName = newProgramName + " ".repeat(DROPDOWN_CHAR_WIDTH - newProgramName.length());
                             programMenus[event.channel().channel - 1].getMenu(0).setText(newProgramName);
                         }
+                    }
+                    case NOTE_ON -> {
+                        byte noteVal = event.channel().note;
+                        pianoRollModels[event.channel().channel - 1].setValue(noteVal & 0xff);
+                    }
+                    case NOTE_OFF -> {
+                        pianoRollModels[event.channel().channel - 1].setValue(0);
+                    }
+                    case SET_TEMPO -> {
+                        String newTempoText = String.format("Tempo: %.2f (ms/tick), %d bpm",
+                                midiController.currentlyPlaying().msPerTick(),
+                                midiController.currentlyPlaying().bpm());
+                        if (!newTempoText.equals(tempoLabel.getText()))
+                            tempoLabel.setText(newTempoText);
                     }
                 }
             }

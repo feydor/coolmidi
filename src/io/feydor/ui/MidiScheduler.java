@@ -219,6 +219,11 @@ public class MidiScheduler {
                 //  the rest of the event's absolute times
                 // FORMAT_1 means track 1 has all of the Global tempo changes
                 // FORMAT_2 means each track has its own tempo changes
+                // TODO
+                if (event.subType == MidiEventSubType.SET_TEMPO) {
+                    midiController.updateChannels(event);
+                }
+
                 yield null;
             }
             case SYSEX -> {

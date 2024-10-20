@@ -9,6 +9,7 @@ import java.util.Map;
 /**
  * The current state of a single MIDI channel
  */
+@SuppressWarnings("rawtypes")
 public class MidiChannel {
     public final int channel; // voice, 1 to 16
     public final boolean used;

@@ -154,6 +154,14 @@ public class Midi {
     }
 
     /**
+     * Current BPM for this MIDI file
+     */
+    public int bpm() {
+        // TODO: Assuming format 1 (track 0 has global tempo)
+        return 60_000_000 / tracks.get(0).getTempo();
+    }
+
+    /**
      * Current microseconds per tick for the MIDI file
      * @throws IllegalStateException When this MIDI files is not in format 1
      */

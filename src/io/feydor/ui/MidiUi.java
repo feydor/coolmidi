@@ -1,10 +1,6 @@
 package io.feydor.ui;
 
 import io.feydor.midi.Midi;
-import io.feydor.midi.MidiChannel;
-import io.feydor.ui.impl.MidiUiEventListener;
-
-import java.util.concurrent.Future;
 
 public interface MidiUi {
     /**

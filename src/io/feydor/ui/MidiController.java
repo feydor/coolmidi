@@ -8,6 +8,7 @@ import io.feydor.util.ByteFns;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.logging.Level;
@@ -23,7 +24,7 @@ public class MidiController {
     private final boolean verbose;
     private TotalTime timeUntilLastEvent;
     private final BlockingQueue<Midi.MidiChunk.Event> pendingMidiEvents = new LinkedBlockingQueue<>();
-    private final BlockingQueue<MidiChannelEvent> pendingChannelEvents = new LinkedBlockingQueue<>();
+    private final BlockingQueue<MidiChannelEvent> pendingChannelEvents = new ArrayBlockingQueue<>(16);
 
     public record MidiChannelEvent(MidiChannel channel, MidiEventSubType eventSubType) {}
 
@@ -139,6 +140,11 @@ public class MidiController {
         }
     }
 
+    /**
+     * Used to update and broadcast events for single channels
+     * @param event usually a midi event
+     * @param parsed data parsed from the event
+     */
     public synchronized void updateChannels(Midi.MidiChunk.Event event, Midi.MidiChunk.ChannelMidiEventParseResult parsed) {
         assertValidChannel((byte) parsed.channel());
         MidiChannel channel = channels[parsed.channel()];
@@ -169,6 +175,22 @@ public class MidiController {
             throw new RuntimeException(e);
         }
     }
+
+    /**
+     * Used for broadcasting events that affect all channels
+     * @param event usually a meta event
+     */
+    public synchronized void updateChannels(Midi.MidiChunk.Event event) {
+        if (event.type != MidiEventType.META)
+            throw new IllegalArgumentException("Only META events can forgo a channel");
+
+        try {
+            pendingChannelEvents.put(new MidiChannelEvent(channels[0], event.subType));
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
 
     public synchronized MidiChannel[] getChannels() {
         return channels;

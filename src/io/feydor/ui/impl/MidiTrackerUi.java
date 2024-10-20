@@ -1,18 +1,16 @@
 package io.feydor.ui.impl;
 
 import io.feydor.midi.Midi;
-import io.feydor.midi.MidiChannel;
+import io.feydor.ui.MidiController;
 import io.feydor.ui.MidiUi;
-import io.feydor.ui.TotalTime;
-
-import java.util.concurrent.Future;
 
 public class MidiTrackerUi implements MidiUi {
 
     @Override
-    public void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime remainingTime, MidiUiEventListener uiEventListener) throws Exception {
+    public void block(Midi midi, MidiController midiController) throws Exception {
         double t = 0;
         int maxMsgLen = 6;
+        var remainingTime = midiController.getCurrentRemainingTime();
         int totalTimeDigits = String.valueOf(Math.round(remainingTime.ms())).length();
         var eventBatches = midi.allEventsInAbsoluteTime();
         for (var eventBatch : eventBatches) {

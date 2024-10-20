@@ -1,21 +1,28 @@
 package io.feydor.ui;
 
-import io.feydor.midi.*;
-import io.feydor.midi.MidiChannel;
-import io.feydor.ui.impl.MidiUiEventListener;
+import io.feydor.midi.Midi;
+import io.feydor.midi.MidiEventSubType;
 import io.feydor.util.ByteFns;
 
 import javax.sound.midi.*;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MidiScheduler {
 
-    private final ExecutorService executor = Executors.newFixedThreadPool(20);
+    private final ExecutorService executor = Executors.newFixedThreadPool(2 * Runtime.getRuntime().availableProcessors());
     private final MidiUi ui;
     private final List<Midi> playlist;
     private final Receiver receiver;
     private final boolean verbose;
+    private volatile boolean listeningToController;
+
+    record EventBatch(int relativeTicks, List<Midi.MidiChunk.Event> events) {}
 
     public MidiScheduler(MidiUi ui, List<Midi> playlist, Receiver receiver, boolean verbose) {
         this.ui = ui;
@@ -24,70 +31,115 @@ public class MidiScheduler {
         this.verbose = verbose;
     }
 
-    /** Play all of the loaded files */
+    /** Play all the loaded files */
     public void scheduleEventsAndWait(boolean loop) throws Exception {
         // For each MIDI file,
         // i. Extract the # of channels used into a map of channel# and its current value
         // ii. Sequence and play the file in a new thread, passing in the channels map to keep track of note values
         // iii. In the thread, display the UI
-        do {
-            for (Midi midi : playlist) {
-                System.out.println("INFO: Playing: " + midi.filename);
-                MidiChannel[] channels = new MidiChannel[16];
-                for (int j = 0; j < 16; ++j) {
-                    channels[j] = new MidiChannel(j + 1, midi.channelsUsed[j]);
-                }
-
-                if (verbose)
-                    System.out.println("INFO: # of channels used: " + Arrays.stream(channels).mapToInt(ch -> ch.used ? 1 : 0).sum());
-
-                // Start playback in a new thread which will update the channel map and the time remaining
-                // and then sleep until the last event in the file
-                MidiUiEventListener midiUiEventListener = new MidiUiEventListener();
-                var eventBatches = midi.allEventsInAbsoluteTime();
-                TotalTime timeUntilLastEvent = new TotalTime(eventBatches.get(eventBatches.size() - 1).get(0).absoluteTime);
-                List<Callable<Object>> scheduledThreads = new ArrayList<>(midi.numTracks());
-                for (var track : midi.getTracks()) {
-                    scheduledThreads.add(Executors.callable(() -> {
-                        try {
-                            scheduleTrack(midi, track, channels, midiUiEventListener);
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    }));
-                }
-
-                ui.block(midi, null, channels, timeUntilLastEvent, midiUiEventListener);
-
-                var futures = executor.invokeAll(scheduledThreads);
-                // Display UI while playing thread
-
-                // block until all tracks completed
-                for (var f : futures) {
-                    f.get();
-                }
-
-                if (midiUiEventListener.isLoopingOn()) {
-                    loop = true;
-                }
-
-                // Display the UI while the playing thread sleeps
-//                Callable<Object> schedulerThread = futures.
-//                if (ui != null) {
-//                    ui.block(midi, schedulerThread, channels, timeUntilLastEvent);
-//                }
-//                else {
-//                    while (!schedulerThread.isDone());
-//                }
+        MidiController midiController = new MidiController(playlist, verbose);
+        Midi currentlyPlaying;
+        while ((currentlyPlaying = midiController.getNextMidi()) != null) {
+            System.out.println("INFO: Playing: " + currentlyPlaying.filename);
+            var scheduledThreads = doSingleThreadedScheduling(currentlyPlaying, midiController);
+            ui.block(currentlyPlaying, midiController);
+            if (!listeningToController)
+                spawnMidiControllerListeningThread(midiController);
+            var futures = executor.invokeAll(scheduledThreads);
+            for (var f : futures) {
+                f.get();
             }
-        } while (loop);
+        }
 
         executor.shutdown();
         System.out.println("END");
         System.exit(0);
     }
 
-    private void scheduleTrack(Midi midi, Midi.MidiChunk.Track track, MidiChannel[] channels, MidiUiEventListener uiEventListener) {
+    private List<Callable<Object>> doSingleThreadedScheduling(Midi midi, MidiController midiController) {
+        List<EventBatch> eventsByRelTicks = getEventBatchesByRelativeTicks(midi);
+
+        List<Callable<Object>> scheduledThreads = new ArrayList<>(midi.numTracks());
+        scheduledThreads.add(Executors.callable(() -> scheduleEvents(midi, eventsByRelTicks, midiController)));
+        return scheduledThreads;
+    }
+
+    private List<Callable<Object>> doThreadPerTrackScheduling(Midi midi, MidiController midiController) {
+        List<Callable<Object>> scheduledThreads = new ArrayList<>(midi.numTracks());
+        for (var track : midi.getTracks()) {
+            scheduledThreads.add(Executors.callable(() -> {
+                try {
+                    scheduleTrack(midi, track, midiController);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }));
+        }
+        return scheduledThreads;
+    }
+
+    private List<EventBatch> getEventBatchesByRelativeTicks(Midi midi) {
+        List<Midi.MidiChunk.Track> tracks = midi.getTracks();
+        List<Midi.MidiChunk.Track> absoluteTicksTracks = new ArrayList<>();
+        for (var track : tracks) {
+            List<Midi.MidiChunk.Event> absEvents = new ArrayList<>();
+            int t = 0;
+            for (var event : track.events) {
+                t += event.ticks;
+                Midi.MidiChunk.Event absEvent = new Midi.MidiChunk.Event(event, t);
+                absEvents.add(absEvent);
+            }
+
+            absoluteTicksTracks.add(new Midi.MidiChunk.Track(track, absEvents));
+        }
+
+        List<Midi.MidiChunk.Event> allEvents = absoluteTicksTracks.stream().flatMap(track -> track.events.stream()).toList();
+        Map<Integer, List<Midi.MidiChunk.Event>> byAbsTicks = new TreeMap<>();
+        for (var event : allEvents) {
+            if (!byAbsTicks.containsKey(event.ticks)) {
+                byAbsTicks.put(event.ticks, new ArrayList<>());
+            }
+            var list = byAbsTicks.get(event.ticks);
+            list.add(event);
+            byAbsTicks.put(event.ticks, list);
+        }
+
+        List<EventBatch> byRelTicks = new ArrayList<>();
+        byRelTicks.add(new EventBatch(0, byAbsTicks.get(0))); // seed with time = 0 events
+        Map.Entry<Integer, List<Midi.MidiChunk.Event>> prevEntry = null;
+        for (var entry : byAbsTicks.entrySet()) {
+            if (prevEntry != null) {
+                int relTicks = entry.getKey() - prevEntry.getKey();
+                byRelTicks.add(new EventBatch(relTicks, entry.getValue()));
+            }
+            prevEntry = entry;
+        }
+
+        return byRelTicks;
+    }
+
+    private void scheduleEvents(Midi midi, List<EventBatch> eventsByRelTicks, MidiController midiController) {
+        long ticks = 0;
+
+        for (var eventBatch : eventsByRelTicks) {
+            double elapsedMicros = eventBatch.relativeTicks() * midi.microsPerTick();
+            long toDelay = (long) (elapsedMicros * 1_000.0);
+            busySleep(toDelay);
+            ticks += eventBatch.relativeTicks();
+
+            // Now play all the events for this tick
+            for (var event : eventBatch.events()) {
+                if (event.subType == MidiEventSubType.SET_TEMPO) {
+                    int newTempo = Integer.parseUnsignedInt(event.message.substring(6), 16);
+                    System.out.printf("WARN: Encountered SET_TEMPO event @tick=%d! currentGlobalTempo=%s, newTempo=%d\n", ticks, midi.getTracks().get(0).getTempo(), newTempo);
+                    midi.updateGlobalTempo(newTempo);
+                }
+                sendEvent(event, midiController);
+            }
+        }
+    }
+
+    private void scheduleTrack(Midi midi, Midi.MidiChunk.Track track, MidiController midiController) {
         long ticks = 0;
         long time = 0;
 
@@ -95,8 +147,7 @@ public class MidiScheduler {
             var event = track.events.get(i);
             if (event.ticks > 0) {
                 double elapsedMicros = event.ticks * midi.microsPerTick();
-                double eventLapsedTime = handleEvents(uiEventListener, channels, time);
-                busySleep((long) ((elapsedMicros + eventLapsedTime) * 1_000.0));
+                busySleep((long) (elapsedMicros * 1_000.0));
                 ticks += event.ticks;
                 time += (long) elapsedMicros;
             }
@@ -115,7 +166,7 @@ public class MidiScheduler {
                 System.out.printf("WARN: Encountered SMPTE_OFFSET event! event=%s\n", event);
             }
 
-            sendEvent(event, channels);
+            sendEvent(event, midiController);
         }
     }
 
@@ -127,21 +178,21 @@ public class MidiScheduler {
         } while (elapsed < nanos);
     }
 
-    /**
-     * @return elapsed time in microseconds
-     */
-    private long handleEvents(MidiUiEventListener uiEventListener, MidiChannel[] channels, long absoluteTime) {
-        long start = System.nanoTime();
-        Midi.MidiChunk.Event event = uiEventListener.getEventOrNull(absoluteTime);
-        if (event != null)
-            sendEvent(event, channels);
-        return (long) ((System.nanoTime() - start) / 1_000.0);
+    private void spawnMidiControllerListeningThread(MidiController midiController) {
+        listeningToController = true;
+        executor.submit(() -> {
+            // TODO: shutdown and restart on each midi track?
+           while (listeningToController) {
+               var event = midiController.listenForMidiEvent();
+               sendEvent(event, midiController);
+           }
+        });
     }
 
-    private void sendEvent(Midi.MidiChunk.Event event, MidiChannel[] channels) {
+    private void sendEvent(Midi.MidiChunk.Event event, MidiController midiController) {
         MidiMessage msg;
         try {
-            msg = makeMidiMessage(event, channels);
+            msg = makeMidiMessage(event, midiController);
         } catch (InvalidMidiDataException e) {
             throw new RuntimeException(e);
         }
@@ -151,118 +202,16 @@ public class MidiScheduler {
     }
 
     /**
-     * Sequences the events in a MIDI file and schedules when they will be sent according to each event's deltatime (in absolute time).
-     * Should be run in a new thread.
-     * @param midi The file to playback
-     * @param channels A map of channels used to their values. Set by this method.
-     * @param timeUntilLastEvent The file's remaining time. The time of the last event in absolute time.
-     * @throws InterruptedException When the thread is interrupted somehow
-     */
-    private Void scheduleEventsAndWait(Midi midi, MidiChannel[] channels, TotalTime timeUntilLastEvent) throws InterruptedException {
-        // Schedule the events in absolute time, each batch is scheduled for the same time
-
-        List<List<Midi.MidiChunk.Event>> eventsByAbsoluteTime = midi.allEventsInAbsoluteTime();
-        long start = System.nanoTime();
-        for (int i=0; i<eventsByAbsoluteTime.size(); ++i) {
-            var batch = eventsByAbsoluteTime.get(i);
-            List<Midi.MidiChunk.Event> nextBatch = null;
-            if (i < (eventsByAbsoluteTime.size() - 1)) {
-                nextBatch = eventsByAbsoluteTime.get(i+1);
-            }
-            double ms = batch.get(0).absoluteTime;
-            // sleep the difference between when the event should be fired and the current song time in ms
-            Thread.sleep((long)(ms - (System.nanoTime() - start)/1_000_000));
-            long elapsedTime = (System.nanoTime() - start)/1_000_000; // ms
-
-            boolean tempoChanged = false;
-            for (var event : batch) {
-                if (event.subType == MidiEventSubType.SET_TEMPO) {
-                    if (tempoChanged) {
-                        throw new IllegalArgumentException("Cannot change tempo twice in same batch");
-                    }
-                    if (elapsedTime > 100) {
-//                        System.out.println("YEET");
-//                        System.out.println(nextBatch);
-                    }
-                    System.out.println("tempo change @ " + elapsedTime);
-                    // handle global tempo change
-                    int newTempo = Integer.parseUnsignedInt(event.message.substring(6), 16);
-                    midi.updateGlobalTempo(newTempo);
-                    eventsByAbsoluteTime = midi.allEventsInAbsoluteTime(elapsedTime); // only affects batches in the future, same number of batches
-                    i = 0; // reset i to first batch (the next future batch)
-                    tempoChanged = true;
-                    // TODO: update timeUntilLastEvent
-                }
-
-                sendEvent(event, channels);
-            }
-        }
-
-//        for (int i=0; i<eventsByAbsoluteTime.entrySet().size(); ++i) {
-//            double time = timeItr.next();
-//            Thread.sleep(Math.round(time));
-//            t += Math.round(time);
-//            for (var event : eventsByAbsoluteTime.get(time)) {
-//                if (event.subType == MidiEventSubType.SET_TEMPO) {
-//                    // handle global tempo change
-//                    int newTempo = Integer.parseUnsignedInt(event.message.substring(3), 16);
-//                    midi.updateGlobalTempo(newTempo);
-//                    eventsByAbsoluteTime = midi.updateAbsoluteTimes(t);
-//                }
-//
-//                MidiMessage msg;
-//                try {
-//                    msg = makeMidiMessage(event, channels);
-//                } catch (InvalidMidiDataException e) {
-//                    throw new RuntimeException(e);
-//                }
-//                if (msg != null)
-//                    receiver.send(msg, -1);
-//            }
-//        }
-
-//        var eventBatches = midi.allEventsInAbsoluteTime();
-//        Timer timer = new Timer();
-//        long beforeSequencing = System.nanoTime();
-//        for (var eventBatch : eventBatches) {
-//            long absoluteTimeInMs = Math.round(eventBatch.get(0).absoluteTime);
-//            timer.schedule(new TimerTask() {
-//                @Override
-//                public void run() {
-//                    for (var event : eventBatch) {
-//                        MidiMessage msg;
-//                        try {
-//                            msg = makeMidiMessage(event, channels);
-//                        } catch (InvalidMidiDataException e) {
-//                            throw new RuntimeException(e);
-//                        }
-//
-//                        if (msg != null)
-//                            receiver.send(msg, -1);
-//                    }
-//                }
-//            }, absoluteTimeInMs);
-//        }
-
-        // Sleep until the last event is played (accounting for how long the above sequencing loop took)
-//        long totalSequencingTimeMs = (System.nanoTime() - beforeSequencing) / 1_000_000;
-//        Thread.sleep(Math.round(timeUntilLastEvent.ms()));
-        System.out.println("DONE playing!");
-        return null;
-    }
-
-    /**
      * Parses each event into the format required to the Java MidiSystem Receiver.
      * @param event The MIDI event to parse
-     * @param channels The map of channels and their values to update
      * @return The formatted message ready to be sent
      * @throws InvalidMidiDataException When an invalid MIDI event is encountered
      */
-    private MidiMessage makeMidiMessage(Midi.MidiChunk.Event event, MidiChannel[] channels) throws InvalidMidiDataException {
+    private MidiMessage makeMidiMessage(Midi.MidiChunk.Event event, MidiController midiController) throws InvalidMidiDataException {
         return switch (event.type) {
             case MIDI -> {
                 var parsed = event.parseAsChannelMidiEvent();
-                updateChannels(event, parsed, channels);
+                midiController.updateChannels(event, parsed);
                 yield new ShortMessage(parsed.cmd(), parsed.channel(), parsed.data1(), parsed.data2());
             }
             case META -> {
@@ -279,31 +228,4 @@ public class MidiScheduler {
             case UNKNOWN -> throw new RuntimeException("Encountered a completely unknown event: " + event);
         };
     }
-
-    private void updateChannels(Midi.MidiChunk.Event event, Midi.MidiChunk.ChannelMidiEventParseResult parsed, MidiChannel[] channels) {
-        var channel = channels[parsed.channel()];
-        switch (event.subType) {
-            case NOTE_ON -> {
-                channel.setNoteOn(true);
-                channel.setNote((byte) parsed.data1());
-                channel.setNoteVelocity((byte) parsed.data2());
-            }
-            case NOTE_OFF -> {
-                channel.setNoteOn(false);
-                channel.setNote((byte) 0);
-                channel.setNoteVelocity((byte) 0);
-            }
-            case POLYPHONIC_PRESSURE -> channel.setPolyphonicPressure((byte) parsed.data1(), (byte) parsed.data2());
-            case PITCH_BEND -> {
-                int pitch = (parsed.data2() << 7) | parsed.data1();
-                channel.setPitchBend(pitch);
-            }
-            case PROGRAM_CHANGE -> {
-                channel.setProgram((byte) parsed.data1());
-            }
-            case CHANNEL_PRESSURE -> channel.setPressure((byte) parsed.data1());
-            case CONTROLLER -> channel.setController((byte) parsed.data1(), (byte) parsed.data2());
-        }
-    }
-
 }

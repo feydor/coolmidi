@@ -10,9 +10,7 @@ public interface MidiUi {
     /**
      * Runs a UI in the current thread and blocks
      * @param midi The currently playing midi. Used to access statistics.
-     * @param playbackThread The currently playing thread's future
-     * @param channels A map from midi channel # to that channel's current value
-     * @param remainingTime The time until the last event plays in absolute time
+     * @param midiController Used to interface between UI and player
      */
-    void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime remainingTime, MidiUiEventListener uiEventListener) throws Exception;
+    void block(Midi midi, MidiController midiController) throws Exception;
 }

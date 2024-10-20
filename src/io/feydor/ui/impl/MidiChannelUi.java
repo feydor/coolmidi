@@ -2,6 +2,7 @@ package io.feydor.ui.impl;
 
 import io.feydor.midi.Midi;
 import io.feydor.midi.MidiChannel;
+import io.feydor.ui.MidiController;
 import io.feydor.ui.MidiUi;
 import io.feydor.ui.Terminal;
 import io.feydor.ui.TotalTime;
@@ -10,17 +11,16 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
-import java.util.concurrent.Future;
 
 public class MidiChannelUi implements MidiUi {
     private static final int UPDATE_PERIOD = 100; // ms
     private static TotalTime remainingTime;
 
     @Override
-    public void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime remainingTime, MidiUiEventListener uiEventListener) throws Exception {
-        MidiChannelUi.remainingTime = remainingTime;
+    public void block(Midi midi, MidiController midiController) throws Exception {
+        MidiChannelUi.remainingTime = midiController.getCurrentRemainingTime();
         var timer = new Timer();
-        timer.scheduleAtFixedRate(new UiThread(timer, channels), 0, UPDATE_PERIOD);
+        timer.scheduleAtFixedRate(new UiThread(timer, midiController.getChannels()), 0, UPDATE_PERIOD);
 
         Thread.sleep((long) remainingTime.ms() + 2000);
 

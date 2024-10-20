@@ -1,14 +1,13 @@
 package io.feydor.ui.impl;
 
 import io.feydor.midi.Midi;
-import io.feydor.midi.MidiChannel;
+import io.feydor.ui.MidiController;
 import io.feydor.ui.MidiUi;
 import io.feydor.ui.Terminal;
 import io.feydor.ui.TotalTime;
 
 import java.util.Timer;
 import java.util.TimerTask;
-import java.util.concurrent.Future;
 
 public class MidiStatusLineUi implements MidiUi {
     private static final String BLOCK = " ";
@@ -19,8 +18,9 @@ public class MidiStatusLineUi implements MidiUi {
     private static final String BG_OFF = "\033[0m";
 
     @Override
-    public void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime remainingTime, MidiUiEventListener uiEventListener) throws Exception {
+    public void block(Midi midi, MidiController midiController) throws Exception {
         var timer = new Timer();
+        var remainingTime = midiController.getCurrentRemainingTime();
         timer.scheduleAtFixedRate(new UiThread(remainingTime, timer), 0, UPDATE_PERIOD);
 
         Thread.sleep((long) remainingTime.ms() + 2000);

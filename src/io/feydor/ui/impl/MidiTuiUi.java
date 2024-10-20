@@ -2,28 +2,27 @@ package io.feydor.ui.impl;
 
 import io.feydor.midi.Midi;
 import io.feydor.midi.MidiChannel;
+import io.feydor.ui.MidiController;
 import io.feydor.ui.MidiUi;
 import io.feydor.ui.TotalTime;
-
-import java.util.concurrent.Future;
 
 public class MidiTuiUi implements MidiUi {
     private final static String[] NOTES = new String[]{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 
     @Override
-    public void block(Midi midi, Future<Void> playbackThread, MidiChannel[] channels, TotalTime timeUntilLastEvent, MidiUiEventListener uiEventListener) throws Exception {
+    public void block(Midi midi, MidiController midiController) throws Exception {
         // Display the UI while the playing thread sleeps
-        nowPlayingUi(midi, channels, timeUntilLastEvent, playbackThread);
+        nowPlayingUi(midi, midiController.getChannels(), midiController.getCurrentRemainingTime());
     }
 
-    private void nowPlayingUi(Midi midi, MidiChannel[] channels, TotalTime timeRemaining, Future<Void> schedulerThread) throws InterruptedException {
+    private void nowPlayingUi(Midi midi, MidiChannel[] channels, TotalTime timeRemaining) throws InterruptedException {
         int filenamePos = 0;
         long ticks = 0;
         int tickLength = 1000; // 1 sec
         int TERM_WIDTH = 100;
         System.out.print("\033[H\033[2J");
         System.out.flush();
-        while (!schedulerThread.isDone()) {
+        while (true) {
             System.out.print("\033[" + 1 + ";" + 1 + "H");
             System.out.println("CoolMidi v0.1.0 " + "/".repeat(TERM_WIDTH - 16));
             System.out.print("\033[" + 2 + ";" + 1 + "H");

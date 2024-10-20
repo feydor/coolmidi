@@ -663,6 +663,15 @@ public class Midi {
                 this.trackNum = trackNum;
             }
 
+            public Track(Track o, List<Event> withEvents) {
+                trackNum = o.trackNum;
+                id = o.id;
+                len = o.len;
+                events = withEvents;
+                tempo = o.tempo;
+                timeSignature = o.timeSignature;
+            }
+
             /**
              * Convert the track's events relative delta-times into absolute times in milliseconds
              * @param tickdiv Comes from the MIDI header
@@ -796,6 +805,17 @@ public class Midi {
                 this.runningStatus = runningStatus;
                 this.dataStart = dataStart;
                 this.dataLen = dataLen;
+            }
+
+            public Event(Event other, int withTicks) {
+                type = other.type;
+                subType = other.subType;
+                ticks = withTicks;
+                tickBytes = other.tickBytes;
+                message = other.message;
+                runningStatus = other.runningStatus;
+                dataStart = other.dataStart;
+                dataLen = other.dataLen;
             }
 
             /** Returns the number of bytes represented in the message */

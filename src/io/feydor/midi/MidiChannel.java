@@ -1,9 +1,7 @@
 package io.feydor.midi;
 
-import io.feydor.ui.impl.ChannelListener;
 import io.feydor.util.JsonIo;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +26,6 @@ public class MidiChannel {
     public static final int CONTROLLER_PAN = 10;
     private static final Map<Byte, String> GM_PROGRAM_TO_NAME = new HashMap<>();
     private static final Map<String, Byte> GM_NAME_TO_PROGRAM = new HashMap<>();
-    private final List<ChannelListener> channelListeners = new ArrayList<>();
 
     // Populate GM program names map using csv file
     static {
@@ -93,10 +90,8 @@ public class MidiChannel {
         if (program < 0)
             throw new RuntimeException("New program must be between 0 and 127 (inclusive): " + program);
 
-        if (this.program != program) {
+        if (this.program != program)
             this.program = program;
-            channelListeners.forEach(listener -> listener.changed(channel));
-        }
     }
 
     public void setPitchBend(int pitchBend) {
@@ -142,9 +137,5 @@ public class MidiChannel {
                 ", pitchBend=" + pitchBend +
                 ", pressure=" + pressure +
                 '}';
-    }
-
-    public void addChangeListener(ChannelListener channelListener) {
-        channelListeners.add(channelListener);
     }
 }

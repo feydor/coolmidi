@@ -12,6 +12,7 @@ import java.util.TreeMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.locks.LockSupport;
 
 public class MidiScheduler {
 
@@ -177,11 +178,21 @@ public class MidiScheduler {
     }
 
     public static void busySleep(long nanos) {
-        long elapsed;
-        final long startTime = System.nanoTime();
-        do {
-            elapsed = System.nanoTime() - startTime;
-        } while (elapsed < nanos);
+        if (nanos == 0) return;
+        long startTime = System.nanoTime();
+        LockSupport.parkNanos(nanos);
+        long elapsed = System.nanoTime() - startTime;
+
+        long margin = (long) (nanos * 0.02);
+        boolean isInRange = elapsed < (elapsed + margin) && elapsed > (elapsed - margin);
+        if (!isInRange) {
+            System.err.println("Did NOT sleep the required amount: " + elapsed + " but wanted " + nanos);
+        }
+//        long elapsed;
+//        final long startTime = System.nanoTime();
+//        do {
+//            elapsed = System.nanoTime() - startTime;
+//        } while (elapsed < nanos);
     }
 
     private void spawnMidiControllerListeningThread(MidiController midiController) {

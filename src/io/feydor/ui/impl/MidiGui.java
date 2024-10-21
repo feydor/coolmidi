@@ -10,6 +10,7 @@ import io.feydor.util.FileIo;
 import javax.swing.*;
 import javax.swing.border.BevelBorder;
 import javax.swing.border.EtchedBorder;
+import javax.swing.border.SoftBevelBorder;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.io.File;
@@ -41,23 +42,22 @@ public class MidiGui implements MidiUi {
         }
 
         frame = new JFrame("CMIDI");
-        frame.setSize(300,800);
+        frame.setSize(350,580);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
         var channels = midiController.getChannels();
         JPanel mainPanel = new JPanel();
-        mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));// GridLayout(3, 1, 1, 1)
+        mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
         mainPanel.setBorder(new BevelBorder(BevelBorder.RAISED));
 
         // top panel, file controls
         mainPanel.add(createFileMenu());
-        mainPanel.add(Box.createVerticalGlue());
 
         // middle panel, channel info
-        var middlePanel = new JPanel(new GridLayout(channels.length + 2, 1, 0, 0));
-        middlePanel.setPreferredSize(new Dimension(200, 550));
+        var middlePanel = new JPanel(new GridLayout(channels.length + 1, 1, 0, 0));
+        middlePanel.setPreferredSize(new Dimension(200, 450));
         middlePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE - 1, Integer.MAX_VALUE - 1));
-        middlePanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        middlePanel.setBorder(BorderFactory.createEmptyBorder(5, 10, 0, 10));
         this.programMenus = new JMenuBar[channels.length];
         this.pianoRollModels = new PianoRollModel[channels.length];
         this.muteButtons = new JToggleButton[channels.length];
@@ -71,7 +71,7 @@ public class MidiGui implements MidiUi {
 
             pianoRollModels[i] = new PianoRollModel();
             var progBar = new JProgressBar(pianoRollModels[i]);
-            progBar.setMaximumSize(new Dimension(100, 100));
+            progBar.setMaximumSize(new Dimension(90, 100));
             rowPanel.add(progBar);
 
             middlePanel.add(rowPanel);
@@ -81,13 +81,6 @@ public class MidiGui implements MidiUi {
                 60_000_000 / midi.getTracks().get(0).getTempo()));
         middlePanel.add(tempoLabel);
 
-        var controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        controlPanel.add(createPlayButton());
-        var checkbox = new JCheckBox("Loop?");
-        checkbox.addActionListener(event -> midiController.toggleCurrentMidiLooping());
-        controlPanel.add(checkbox);
-        middlePanel.add(controlPanel);
-
         mainPanel.add(middlePanel);
 
         // bottom panel, song name bar
@@ -95,7 +88,6 @@ public class MidiGui implements MidiUi {
         songBar.setEditable(false);
         songBar.setBorder(new BevelBorder(BevelBorder.LOWERED));
         songBar.setMaximumSize(new Dimension(Integer.MAX_VALUE - 1, 30));
-        mainPanel.add(Box.createVerticalGlue());
         mainPanel.add(songBar);
 
         frame.add(mainPanel);
@@ -109,19 +101,27 @@ public class MidiGui implements MidiUi {
         songBar.setText("Now playing: " + (new File(midi.filename)).getName());
     }
 
-    private JPanel createFileMenu() {
+    private JComponent createFileMenu() {
         fileChooser = new JFileChooser();
-        var openButton = new JButton("Open a File...", FileIo.createImageIcon("images/Open16.gif"));
+        var openButton = new JButton("Open", FileIo.createImageIcon("images/Open16.gif"));
         openButton.setMaximumSize(new Dimension(100, 100));
         openButton.addActionListener(this::handleOpenFileChooser);
+        openButton.setFocusPainted(false);
+        openButton.setBorder(new EtchedBorder());
 //        var saveButton = new JButton("Save a File...", FileIo.createImageIcon("images/Save16.gif"));
 //        saveButton.addActionListener(a -> handleSaveFileChooser(a));
-        var buttonPanel = new JPanel();
-        buttonPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE - 1, 33));
+        var buttonPanel = new JMenuBar();
         buttonPanel.setLayout(new BoxLayout(buttonPanel, BoxLayout.X_AXIS));
+        buttonPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE - 1, 33));
         buttonPanel.add(openButton);
-//        buttonPanel.add(saveButton);
-        buttonPanel.setBorder(new EtchedBorder());
+        buttonPanel.setBorder(new SoftBevelBorder(BevelBorder.RAISED));
+
+        buttonPanel.add(createPlayButton());
+        var checkbox = new JCheckBox("Loop?");
+        checkbox.addActionListener(event -> midiController.toggleCurrentMidiLooping());
+        checkbox.setFocusPainted(false);
+        buttonPanel.add(checkbox);
+
         return buttonPanel;
     }
 
@@ -143,6 +143,7 @@ public class MidiGui implements MidiUi {
     private JToggleButton createMuteButton(MidiChannel channel) {
         var button = new JToggleButton(String.format("%02d", channel.channel));
         button.setMaximumSize(new Dimension(55, 55));
+        button.setFocusPainted(false);
         if (!channel.used)
             button.setEnabled(false);
         button.addActionListener(e -> {
@@ -161,12 +162,12 @@ public class MidiGui implements MidiUi {
 
     @SuppressWarnings("rawtypes")
     private JMenuBar createProgramMenu(MidiChannel midiChannel) {
-        Map<String, Object> menuMap = FileIo.getGmMidiJsonStringMap();
+        Map<String, Object> menuMap = FileIo.getGmMidiJsonStringMapFromResources();
         JMenuBar menuBar = new JMenuBar();
-        menuBar.setPreferredSize(new Dimension(200, 200));
+        menuBar.setPreferredSize(new Dimension(180, 200));
         String initialInstrumentName = midiChannel.used ? midiChannel.getCurrentGmProgramName() : "";
         JMenu rootMenu = new JMenu(initialInstrumentName);
-        rootMenu.setPreferredSize(new Dimension(200, 200));
+        rootMenu.setPreferredSize(new Dimension(180, 200));
         menuBar.add(rootMenu);
         for (var entrySet : menuMap.entrySet()) {
             String groupName = entrySet.getKey();
@@ -221,15 +222,18 @@ public class MidiGui implements MidiUi {
     }
 
     private JToggleButton createPlayButton() {
-        var playButton = new JToggleButton("PLAYING");
+        var playIcon = FileIo.createImageIcon("images/play16.gif");
+        var pauseIcon = FileIo.createImageIcon("images/pause16.gif");
+        var playButton = new JToggleButton(pauseIcon);
+        playButton.setFocusPainted(false);
         playButton.addActionListener(event -> {
             midiController.togglePlaying();
             if (playButton.isSelected()) {
-                playButton.setText("PAUSED");
+                playButton.setIcon(playIcon);
                 for (JToggleButton muteButton : muteButtons)
                     muteButton.setSelected(true);
             } else {
-                playButton.setText("PLAYING");
+                playButton.setIcon(pauseIcon);
                 for (JToggleButton muteButton : muteButtons)
                     muteButton.setSelected(false);
             }

@@ -24,14 +24,14 @@ public class MidiChannel {
     public final byte[] polyphonicPressure; // polyphonic aftertouch values for individual notes on the channel, 0 to 127
     private byte lastVolume = 127;
 
-    public static final int CONTROLLER_VOLUME = 7;
-    public static final int CONTROLLER_PAN = 10;
+    private static final int CONTROLLER_VOLUME = 7;
+    private static final int CONTROLLER_PAN = 10;
     private static final Map<Byte, String> GM_PROGRAM_TO_NAME = new HashMap<>();
     private static final Map<String, Byte> GM_NAME_TO_PROGRAM = new HashMap<>();
 
     // Populate GM program names map using csv file
     static {
-        Map<String, Object> instrumentMenu = FileIo.getGmMidiJsonStringMap();
+        Map<String, Object> instrumentMenu = FileIo.getGmMidiJsonStringMapFromResources();
         int count = 0;
         for (var entry : instrumentMenu.entrySet()) {
             if (entry.getValue() instanceof List instrNames) {

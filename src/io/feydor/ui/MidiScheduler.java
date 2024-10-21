@@ -5,6 +5,7 @@ import io.feydor.midi.MidiEventSubType;
 import io.feydor.util.ByteFns;
 
 import javax.sound.midi.*;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,15 +19,15 @@ public class MidiScheduler {
 
     private final ExecutorService executor = Executors.newFixedThreadPool(2 * Runtime.getRuntime().availableProcessors());
     private final MidiUi ui;
-    private final List<Midi> playlist;
+    private final File input;
     private final boolean verbose;
     private volatile boolean listeningToController;
 
     record EventBatch(int relativeTicks, List<Midi.MidiChunk.Event> events) {}
 
-    public MidiScheduler(MidiUi ui, List<Midi> playlist, boolean verbose) {
+    public MidiScheduler(MidiUi ui, File input, boolean verbose) {
         this.ui = ui;
-        this.playlist = playlist;
+        this.input = input;
         this.verbose = verbose;
     }
 
@@ -36,7 +37,7 @@ public class MidiScheduler {
         // i. Extract the # of channels used into a map of channel# and its current value
         // ii. Sequence and play the file in a new thread, passing in the channels map to keep track of note values
         // iii. In the thread, display the UI
-        MidiController midiController = new MidiController(playlist, verbose);
+        MidiController midiController = new MidiController(input, verbose);
         Midi currentlyPlaying;
         while ((currentlyPlaying = midiController.getNextMidi()) != null) {
             System.out.println("INFO: Playing: " + currentlyPlaying.filename + "...");

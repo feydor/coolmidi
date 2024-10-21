@@ -34,7 +34,7 @@ public final class MidiCliPlayer {
             return;
         }
 
-        List<File> files = new ArrayList<>();
+        File input = null;
         var uiOption = MidiCliOption.STATUS_LINE_UI;
         boolean verbose = false, loop = false;
         for (var arg : args) {
@@ -56,32 +56,15 @@ public final class MidiCliPlayer {
                 case "-E" -> uiOption = MidiCliOption.CHANNEL_UI;
                 case "-v", "--verbose" -> verbose = true;
                 case "-l", "--loop" -> loop = true;
-                default -> files.addAll(parseFiles(arg));
+                default -> input = new File(arg);
             }
         }
 
-        MidiCliPlayer player = new MidiCliPlayer(files, uiOption, verbose);
+        MidiCliPlayer player = new MidiCliPlayer(input, uiOption, verbose);
         player.playAndBlock(loop);
     }
 
-    public MidiCliPlayer(List<File> files, MidiCliOption uiOption, boolean verbose) throws MidiUnavailableException {
-        // Filter out the invalid Midi files
-        List<Midi> playlist = files.stream().map(file -> {
-                    try {
-                        return new Midi(file.getAbsolutePath(), verbose);
-                    } catch (IOException e) {
-                        System.err.printf("The file failed to load: %s\n%s. Skipping...\n", file.getAbsolutePath(), e.getMessage());
-                        return null;
-                    }
-                })
-                .filter(Objects::nonNull)
-                .toList();
-
-        if (!playlist.isEmpty()) {
-            playlist = new ArrayList<>(playlist);
-            Collections.shuffle(playlist);
-        }
-
+    public MidiCliPlayer(File file, MidiCliOption uiOption, boolean verbose) throws MidiUnavailableException {
         MidiUi ui = new MidiGui();
 //        MidiUi ui = switch (uiOption) {
 //            case TUI_UI -> new MidiTuiUi();
@@ -91,7 +74,7 @@ public final class MidiCliPlayer {
 //            case NO_UI -> new MidiGui();
 //        };
 
-        this.midiScheduler = new MidiScheduler(ui, playlist, verbose);
+        this.midiScheduler = new MidiScheduler(ui, file, verbose);
     }
 
     public void playAndBlock(boolean loop) throws Exception {

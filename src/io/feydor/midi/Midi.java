@@ -2,6 +2,7 @@ package io.feydor.midi;
 
 import io.feydor.midi.exceptions.MidiInvalidHeaderException;
 import io.feydor.midi.exceptions.MidiParseException;
+import io.feydor.ui.MidiOverrides;
 import io.feydor.util.ByteFns;
 import io.feydor.util.VarLenQuant;
 
@@ -40,11 +41,25 @@ public class Midi {
      * @param filename The file to parse
      * @throws MidiParseException When the file is unparsable
      */
-    public Midi(String filename, boolean verbose) throws IOException {
+    public Midi(String filename, MidiOverrides midiOverrides, boolean verbose) throws IOException {
         this.filename = filename;
         this.verbose = verbose;
         parseMidiFile(filename);
         unmodifiableTracks = Collections.unmodifiableList(tracks);
+
+        // Apply Overrides
+        var trackToInsertInto = tracks.size() == 1 ? tracks.get(0) : tracks.get(1); // arbitrarily picking the first non-header track
+        int i = 0;
+        for (; i < trackToInsertInto.events.size(); ++i) {
+            if (trackToInsertInto.events.get(i).ticks != 0)
+                break;
+        }
+
+        if (i == trackToInsertInto.events.size())
+            throw new RuntimeException("Reached end of track: " + trackToInsertInto);
+
+        var events = midiOverrides.toMidiEvents();
+        trackToInsertInto.events.addAll(i, events);
     }
 
     public Midi(String filename) throws IOException {
@@ -826,6 +841,28 @@ public class Midi {
                 dataLen = other.dataLen;
             }
 
+            public static Event createProgramChangeEvent(int channel, int program) {
+                assertValidChannel((byte) channel);
+                assertValidProgram((short)program);
+                // 2 byte message, first byte's upper nibble is status (1100 aka 0x0C), second byte is the new program
+                String msg = "c" + ByteFns.toHex((byte) channel).charAt(1) + ByteFns.toHex((byte)program);
+                return new Midi.MidiChunk.Event(MidiEventType.MIDI, MidiEventSubType.PROGRAM_CHANGE, 1, 1,
+                        msg, false, 1, 1);
+            }
+
+            public static Event createChannelVolumeEvent(int channel, int volume) {
+                assertValidChannel((byte) channel);
+                String msg = "b" + ByteFns.toHex((byte) (channel & 0xFF)).charAt(1) + "07" + ByteFns.toHex((byte)(volume & 0xFF));
+                return new Midi.MidiChunk.Event(MidiEventType.MIDI, MidiEventSubType.CONTROLLER, 1, 1,
+                        msg, false, 1, 2);
+            }
+
+            public static Event createNoteOffEvent(int channel, int note, int velocity) {
+                String msg = "8" + ByteFns.toHex((byte) channel).charAt(1) + ByteFns.toHex((byte)note) + ByteFns.toHex((byte)velocity);
+                return new Midi.MidiChunk.Event(MidiEventType.MIDI, MidiEventSubType.NOTE_OFF, 1, 1,
+                        msg, false, 1, 2);
+            }
+
             /** Returns the number of bytes represented in the message */
             public int nbytes() {
                 return message.length() / 2;
@@ -875,6 +912,18 @@ public class Midi {
                 byte[] data = Arrays.copyOfRange(msg, dataStart, msg.length);
                 int status = Integer.parseUnsignedInt(message.substring(0, 2), 16);
                 return new MetaEventParseResult(status, data, data.length);
+            }
+
+            public static void assertValidChannel(byte channel) {
+                if (channel < 0 || channel > 15) {
+                    throw new IllegalArgumentException("Channel must be within 0 and 15 (inclusive): " + channel);
+                }
+            }
+
+            private static void assertValidProgram(short program) {
+                if (program < 0 || program > 127) {
+                    throw new IllegalArgumentException("Program must be between 0 and 127 (inclusive): " + program);
+                }
             }
 
             @Override

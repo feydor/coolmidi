@@ -5,21 +5,24 @@ import io.feydor.midi.MidiChannel;
 import io.feydor.midi.MidiEventSubType;
 import io.feydor.midi.MidiEventType;
 import io.feydor.util.ByteFns;
+import io.feydor.util.FileIo;
 
 import javax.sound.midi.*;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
+
+import static io.feydor.midi.Midi.MidiChunk.Event.assertValidChannel;
 
 public class MidiController implements Closeable {
-    private static final Logger LOGGER = Logger.getLogger( MidiController.class.getName() );
+    private static final Logger LOGGER = Logger.getLogger(MidiController.class.getName());
 
     private final List<Midi> midiPlaylist;
     private final MidiChannel[] channels;
@@ -32,24 +35,50 @@ public class MidiController implements Closeable {
     private volatile boolean quitPlayingImmediately;
     private final BlockingQueue<Midi.MidiChunk.Event> pendingMidiEvents = new LinkedBlockingQueue<>();
     private final BlockingQueue<MidiChannelEvent> pendingChannelEvents = new ArrayBlockingQueue<>(16);
+    private static final String MID_EXT_REGEX = "^.*\\.(mid|midi)$";
 
     public record MidiChannelEvent(MidiChannel channel, MidiEventSubType eventSubType) {}
 
-    public MidiController(List<Midi> midiPlaylist, boolean verbose) throws MidiUnavailableException {
-        if (midiPlaylist.isEmpty())
-            throw new IllegalArgumentException("Midi playlist cannot be empty");
+    public MidiController(File input, boolean verbose) throws MidiUnavailableException {
+        if (!input.exists())
+            throw new IllegalArgumentException("File does not exist: " + input.getAbsolutePath());
         // Get the default MIDI device and its receiver
         if (verbose) {
             var devices = MidiSystem.getMidiDeviceInfo();
             LOGGER.log(Level.INFO, "Available devices: {0}\n", Arrays.toString(devices));
         }
 
+        this.verbose = verbose;
+        this.midiPlaylist = new ArrayList<>();
+        this.midiPlaylist.addAll(parseMidiFiles(input));
         this.receiver = MidiSystem.getReceiver();
-        this.midiPlaylist = midiPlaylist;
         this.channels = new MidiChannel[16];
         this.currentMidiIndex = -1;
-        this.verbose = verbose;
         refreshChannels(midiPlaylist.get(0));
+    }
+
+    public List<Midi> parseMidiFiles(File input) {
+        if (input.isDirectory()) {
+            File[] dirFiles = input.listFiles((dir, name) -> name.toLowerCase().matches(MID_EXT_REGEX));
+            if (dirFiles == null || dirFiles.length == 0)
+                throw new IllegalArgumentException("Directory did not contain any .mid or .midi files: " + input.getAbsolutePath());
+            return Arrays.stream(dirFiles).map(this::parseMidi).filter(Optional::isPresent).map(Optional::get).toList();
+        } else {
+            if (!input.getAbsolutePath().matches(MID_EXT_REGEX))
+                throw new IllegalArgumentException("Not a valid .mid or .midi file: " + input.getAbsolutePath());
+            return Stream.of(parseMidi(input)).filter(Optional::isPresent).map(Optional::get).toList();
+        }
+    }
+
+    private Optional<Midi> parseMidi(File file) {
+        try {
+            MidiOverrides overrides = new MidiOverrides(file);
+            return Optional.of(new Midi(file.getAbsolutePath(), overrides, verbose));
+        } catch (IOException e) {
+            LOGGER.log(Level.SEVERE, "Failed to parse file: {0}. Exception: {1}. Skipping...",
+                    new Object[]{file.getAbsolutePath(), e.toString()});
+            return Optional.empty();
+        }
     }
 
     public Midi getCurrentlyPlaying() {
@@ -156,33 +185,27 @@ public class MidiController implements Closeable {
     }
 
     public void addProgramChangeEvent(byte channel, short program) {
-        assertValidChannel(channel);
         if (program < 0 || program > 127) {
             throw new IllegalArgumentException("Program must be between 0 and 127 (inclusive): " + program);
         }
 
-        // 2 byte message, first byte's upper nibble is status (1100 aka 0x0C), second byte is the new program
-        String message = "c" + ByteFns.toHex((byte) (channel & 0xFF)).charAt(1) + ByteFns.toHex((byte)(program & 0xFF));
-        createAndPutNewMidiEvent(message, MidiEventSubType.PROGRAM_CHANGE, 1);
+        var event = Midi.MidiChunk.Event.createProgramChangeEvent(channel, program);
+        putNewMidiEvent(event);
         LOGGER.log(Level.INFO, "Added PROGRAM_CHANGE event: channel={0}, program={1}", new Object[]{channel, program});
     }
 
     public void addChannelVolumeEvent(byte channel, byte volume) {
-        assertValidChannel(channel);
-
-        String message = "b" + ByteFns.toHex((byte) (channel & 0xFF)).charAt(1) + "07" + ByteFns.toHex((byte)(volume & 0xFF));
-        createAndPutNewMidiEvent(message, MidiEventSubType.CONTROLLER, 2);
+        var event = Midi.MidiChunk.Event.createChannelVolumeEvent(channel, volume);
+        putNewMidiEvent(event);
         LOGGER.log(Level.INFO, "Added CHANNEL_VOLUME event: channel={0}, volume={1}", new Object[]{channel, volume});
     }
 
     private void addNoteOffEvent(MidiChannel channel) {
-        String msg = "8" + ByteFns.toHex((byte) (channel.channel & 0xFF)).charAt(1) + ByteFns.toHex(channel.note) + "7F";
-        createAndPutNewMidiEvent(msg, MidiEventSubType.NOTE_OFF, 2);
+        var event = Midi.MidiChunk.Event.createNoteOffEvent(channel.channel, channel.note, 127);
+        putNewMidiEvent(event);
     }
 
-    private void createAndPutNewMidiEvent(String message, MidiEventSubType subType, int dataLen) {
-        var event =  new Midi.MidiChunk.Event(MidiEventType.MIDI, subType, 1, 1,
-                message, false, 1, dataLen);
+    private void putNewMidiEvent(Midi.MidiChunk.Event event) {
         try {
             pendingMidiEvents.put(event);
         } catch (InterruptedException e) {
@@ -197,12 +220,6 @@ public class MidiController implements Closeable {
         if (verbose)
             LOGGER.log(Level.INFO, "# of channels used: {0}",
                     Arrays.stream(channels).mapToInt(ch -> ch.used ? 1 : 0).sum());
-    }
-
-    private static void assertValidChannel(byte channel) {
-        if (channel < 0 || channel > 15) {
-            throw new IllegalArgumentException("Channel must be within 0 and 15 (inclusive): " + channel);
-        }
     }
 
     /**

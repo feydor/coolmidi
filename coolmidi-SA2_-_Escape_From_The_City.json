@@ -1,0 +1,17 @@
+{
+  "filename": "SA2_-_Escape_From_The_City.mid",
+  "channelOverrides": [
+    {
+      "channel": 11,
+      "program": 28
+    },
+    {
+      "channel": 12,
+      "volume": 0
+    },
+    {
+      "channel": 10,
+      "volume": 0
+    }
+  ]
+}

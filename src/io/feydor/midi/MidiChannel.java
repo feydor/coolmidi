@@ -1,6 +1,6 @@
 package io.feydor.midi;
 
-import io.feydor.util.JsonIo;
+import io.feydor.util.FileIo;
 
 import java.util.HashMap;
 import java.util.List;
@@ -22,6 +22,7 @@ public class MidiChannel {
     public int pitchBend; // 0 to 16,383, 8,192 means no pitch bend
     public byte pressure; // the pressure applied to all notes on the channel 0 to 127
     public final byte[] polyphonicPressure; // polyphonic aftertouch values for individual notes on the channel, 0 to 127
+    private byte lastVolume = 127;
 
     public static final int CONTROLLER_VOLUME = 7;
     public static final int CONTROLLER_PAN = 10;
@@ -30,7 +31,7 @@ public class MidiChannel {
 
     // Populate GM program names map using csv file
     static {
-        Map<String, Object> instrumentMenu = JsonIo.getGmMidiJsonStringMap();
+        Map<String, Object> instrumentMenu = FileIo.getGmMidiJsonStringMap();
         int count = 0;
         for (var entry : instrumentMenu.entrySet()) {
             if (entry.getValue() instanceof List instrNames) {
@@ -47,7 +48,6 @@ public class MidiChannel {
             GM_NAME_TO_PROGRAM.put(entry.getValue(), entry.getKey());
         }
     }
-
 
     public MidiChannel(int channel, boolean used) {
         if (channel < 1 || channel > 16)
@@ -75,6 +75,10 @@ public class MidiChannel {
     public void setController(byte controller, byte value) {
         if (controller < 0)
             throw new IllegalArgumentException("MIDI controller must be between 0 and 127: controller=" + controller);
+
+        if (controller == CONTROLLER_VOLUME) {
+            lastVolume = controllers[controller];
+        }
         controllers[controller] = value;
         lastController = controller;
     }
@@ -123,6 +127,10 @@ public class MidiChannel {
 
     public String getCurrentGmProgramName() {
         return GM_PROGRAM_TO_NAME.get(program);
+    }
+
+    public byte getLastVolume() {
+        return lastVolume;
     }
 
     @Override

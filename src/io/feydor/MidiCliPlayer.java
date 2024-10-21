@@ -82,12 +82,6 @@ public final class MidiCliPlayer {
             Collections.shuffle(playlist);
         }
 
-        // Get the default MIDI device and its receiver
-        if (verbose) {
-            var devices = MidiSystem.getMidiDeviceInfo();
-            System.out.printf("INFO: Available devices (%d): %s\n", devices.length, Arrays.toString(devices));
-        }
-
         MidiUi ui = new MidiGui();
 //        MidiUi ui = switch (uiOption) {
 //            case TUI_UI -> new MidiTuiUi();
@@ -97,7 +91,7 @@ public final class MidiCliPlayer {
 //            case NO_UI -> new MidiGui();
 //        };
 
-        this.midiScheduler = new MidiScheduler(ui, playlist, MidiSystem.getReceiver(), verbose);
+        this.midiScheduler = new MidiScheduler(ui, playlist, verbose);
     }
 
     public void playAndBlock(boolean loop) throws Exception {

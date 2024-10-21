@@ -18,16 +18,14 @@ public class MidiScheduler {
     private final ExecutorService executor = Executors.newFixedThreadPool(2 * Runtime.getRuntime().availableProcessors());
     private final MidiUi ui;
     private final List<Midi> playlist;
-    private final Receiver receiver;
     private final boolean verbose;
     private volatile boolean listeningToController;
 
     record EventBatch(int relativeTicks, List<Midi.MidiChunk.Event> events) {}
 
-    public MidiScheduler(MidiUi ui, List<Midi> playlist, Receiver receiver, boolean verbose) {
+    public MidiScheduler(MidiUi ui, List<Midi> playlist, boolean verbose) {
         this.ui = ui;
         this.playlist = playlist;
-        this.receiver = receiver;
         this.verbose = verbose;
     }
 
@@ -40,7 +38,7 @@ public class MidiScheduler {
         MidiController midiController = new MidiController(playlist, verbose);
         Midi currentlyPlaying;
         while ((currentlyPlaying = midiController.getNextMidi()) != null) {
-            System.out.println("INFO: Playing: " + currentlyPlaying.filename);
+            System.out.println("INFO: Playing: " + currentlyPlaying.filename + "...");
             var scheduledThreads = doSingleThreadedScheduling(currentlyPlaying, midiController);
             ui.block(currentlyPlaying, midiController);
             if (!listeningToController)
@@ -51,6 +49,7 @@ public class MidiScheduler {
             }
         }
 
+        midiController.close();
         executor.shutdown();
         System.out.println("END");
         System.exit(0);
@@ -59,7 +58,7 @@ public class MidiScheduler {
     private List<Callable<Object>> doSingleThreadedScheduling(Midi midi, MidiController midiController) {
         List<EventBatch> eventsByRelTicks = getEventBatchesByRelativeTicks(midi);
 
-        List<Callable<Object>> scheduledThreads = new ArrayList<>(midi.numTracks());
+        List<Callable<Object>> scheduledThreads = new ArrayList<>();
         scheduledThreads.add(Executors.callable(() -> scheduleEvents(midi, eventsByRelTicks, midiController)));
         return scheduledThreads;
     }
@@ -122,6 +121,13 @@ public class MidiScheduler {
         long ticks = 0;
 
         for (var eventBatch : eventsByRelTicks) {
+            while (!midiController.isPlaying())
+                Thread.onSpinWait();
+            if (midiController.hasQuitPlayingImmediately()) {
+                midiController.closeReceiver();
+                break;
+            }
+
             double elapsedMicros = eventBatch.relativeTicks() * midi.microsPerTick();
             long toDelay = (long) (elapsedMicros * 1_000.0);
             busySleep(toDelay);
@@ -129,12 +135,12 @@ public class MidiScheduler {
 
             // Now play all the events for this tick
             for (var event : eventBatch.events()) {
-                if (event.subType == MidiEventSubType.SET_TEMPO) {
+                if (verbose && event.subType == MidiEventSubType.SET_TEMPO) {
                     int newTempo = Integer.parseUnsignedInt(event.message.substring(6), 16);
                     System.out.printf("WARN: Encountered SET_TEMPO event @tick=%d! currentGlobalTempo=%s, newTempo=%d\n", ticks, midi.getTracks().get(0).getTempo(), newTempo);
                     midi.updateGlobalTempo(newTempo);
                 }
-                sendEvent(event, midiController);
+                midiController.sendEvent(event);
             }
         }
     }
@@ -166,7 +172,7 @@ public class MidiScheduler {
                 System.out.printf("WARN: Encountered SMPTE_OFFSET event! event=%s\n", event);
             }
 
-            sendEvent(event, midiController);
+            midiController.sendEvent(event);
         }
     }
 
@@ -184,53 +190,8 @@ public class MidiScheduler {
             // TODO: shutdown and restart on each midi track?
            while (listeningToController) {
                var event = midiController.listenForMidiEvent();
-               sendEvent(event, midiController);
+               midiController.sendEvent(event);
            }
         });
-    }
-
-    private void sendEvent(Midi.MidiChunk.Event event, MidiController midiController) {
-        MidiMessage msg;
-        try {
-            msg = makeMidiMessage(event, midiController);
-        } catch (InvalidMidiDataException e) {
-            throw new RuntimeException(e);
-        }
-        if (msg != null) {
-            receiver.send(msg, -1);
-        }
-    }
-
-    /**
-     * Parses each event into the format required to the Java MidiSystem Receiver.
-     * @param event The MIDI event to parse
-     * @return The formatted message ready to be sent
-     * @throws InvalidMidiDataException When an invalid MIDI event is encountered
-     */
-    private MidiMessage makeMidiMessage(Midi.MidiChunk.Event event, MidiController midiController) throws InvalidMidiDataException {
-        return switch (event.type) {
-            case MIDI -> {
-                var parsed = event.parseAsChannelMidiEvent();
-                midiController.updateChannels(event, parsed);
-                yield new ShortMessage(parsed.cmd(), parsed.channel(), parsed.data1(), parsed.data2());
-            }
-            case META -> {
-                // TODO: META events are not for the Receiver, they are for me to manually adjust
-                //  the rest of the event's absolute times
-                // FORMAT_1 means track 1 has all of the Global tempo changes
-                // FORMAT_2 means each track has its own tempo changes
-                // TODO
-                if (event.subType == MidiEventSubType.SET_TEMPO) {
-                    midiController.updateChannels(event);
-                }
-
-                yield null;
-            }
-            case SYSEX -> {
-                var parsed = event.parseAsSysexEvent();
-                yield new SysexMessage(parsed.type(), parsed.data(), parsed.len());
-            }
-            case UNKNOWN -> throw new RuntimeException("Encountered a completely unknown event: " + event);
-        };
     }
 }

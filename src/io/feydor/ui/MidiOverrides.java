@@ -1,13 +1,11 @@
 package io.feydor.ui;
 
 import io.feydor.midi.Midi;
+import io.feydor.util.DynAccess;
 import io.feydor.util.FileIo;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -35,31 +33,23 @@ public class MidiOverrides {
     @SuppressWarnings({"unchecked", "rawTypes"})
     public List<Midi.MidiChunk.Event> toMidiEvents() {
         var res = new ArrayList<Midi.MidiChunk.Event>();
-        for (var entry : jsonMap.entrySet()) {
-            if (entry.getKey().equals("channelOverrides") && entry.getValue() instanceof List channelOverrides) {
-                LOGGER.log(Level.INFO, "Encountered overrides: {0}", channelOverrides);
-                for (var obj : channelOverrides) {
-                    res.addAll(parseMidiOverride((Map)obj));
-                }
+        List<Map<String, Object>> channelOverrides = DynAccess.getAsList(jsonMap, "channelOverrides");
+        if (channelOverrides == null)
+            return res;
+        for (var overrideObject : channelOverrides) {
+            Double channel = DynAccess.getAsDouble(overrideObject, "channel");
+            if (channel == null) {
+                LOGGER.log(Level.WARNING, "Overrides need a channel, but not given: {0}", overrideObject);
+                continue;
             }
-        }
-        return res;
-    }
-
-    private List<Midi.MidiChunk.Event> parseMidiOverride(Map<String, Object> overrideObject) {
-        var res = new ArrayList<Midi.MidiChunk.Event>();
-        Double channel = (Double) overrideObject.get("channel");
-        if (channel == null) {
-            LOGGER.log(Level.WARNING, "Overrides need a channel, but not given: {0}", overrideObject);
-            return List.of();
-        }
-        Double volume = (Double) overrideObject.get("volume");
-        Double program = (Double) overrideObject.get("program");
-        if (program != null) {
-            res.add(Midi.MidiChunk.Event.createProgramChangeEvent(channel.byteValue() - 1, program.byteValue()));
-        }
-        if (volume != null) {
-            res.add(Midi.MidiChunk.Event.createChannelVolumeEvent(channel.byteValue() - 1, volume.byteValue()));
+            Double program = DynAccess.getAsDouble(overrideObject, "program");
+            Double volume = DynAccess.getAsDouble(overrideObject, "volume");
+            if (program != null) {
+                res.add(Midi.MidiChunk.Event.createProgramChangeEvent(channel.byteValue() - 1, program.byteValue()));
+            }
+            if (volume != null) {
+                res.add(Midi.MidiChunk.Event.createChannelVolumeEvent(channel.byteValue() - 1, volume.byteValue()));
+            }
         }
         return res;
     }

@@ -4,8 +4,6 @@ import io.feydor.midi.Midi;
 import io.feydor.midi.MidiChannel;
 import io.feydor.midi.MidiEventSubType;
 import io.feydor.midi.MidiEventType;
-import io.feydor.util.ByteFns;
-import io.feydor.util.FileIo;
 
 import javax.sound.midi.*;
 import java.io.Closeable;
@@ -24,6 +22,7 @@ import static io.feydor.midi.Midi.MidiChunk.Event.assertValidChannel;
 public class MidiController implements Closeable {
     private static final Logger LOGGER = Logger.getLogger(MidiController.class.getName());
 
+    private final MidiScheduler midiScheduler;
     private final List<Midi> midiPlaylist;
     private final MidiChannel[] channels;
     private Receiver receiver;
@@ -39,9 +38,7 @@ public class MidiController implements Closeable {
 
     public record MidiChannelEvent(MidiChannel channel, MidiEventSubType eventSubType) {}
 
-    public MidiController(File input, boolean verbose) throws MidiUnavailableException {
-        if (!input.exists())
-            throw new IllegalArgumentException("File does not exist: " + input.getAbsolutePath());
+    public MidiController(MidiScheduler midiScheduler, boolean verbose) throws MidiUnavailableException {
         // Get the default MIDI device and its receiver
         if (verbose) {
             var devices = MidiSystem.getMidiDeviceInfo();
@@ -50,11 +47,16 @@ public class MidiController implements Closeable {
 
         this.verbose = verbose;
         this.midiPlaylist = new ArrayList<>();
-        this.midiPlaylist.addAll(parseMidiFiles(input));
         this.receiver = MidiSystem.getReceiver();
         this.channels = new MidiChannel[16];
         this.currentMidiIndex = -1;
-        refreshChannels(midiPlaylist.get(0));
+//        refreshChannels(midiPlaylist.get(0));
+    }
+
+    public void loadMidiFile(File file) {
+        if (!file.exists())
+            throw new IllegalArgumentException("File does not exist: " + file.getAbsolutePath());
+        midiPlaylist.addAll(parseMidiFiles(file));
     }
 
     public List<Midi> parseMidiFiles(File input) {

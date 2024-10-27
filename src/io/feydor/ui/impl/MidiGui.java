@@ -12,6 +12,9 @@ import javax.swing.border.BevelBorder;
 import javax.swing.border.EtchedBorder;
 import javax.swing.border.SoftBevelBorder;
 import java.awt.*;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.ActionEvent;
 import java.io.File;
 import java.io.IOException;
@@ -28,6 +31,33 @@ public class MidiGui implements MidiUi {
     private JTextField songBar;
     private MidiController midiController;
     private volatile boolean isListeningForChannelEvents;
+    private TransferHandler transferHandler = new TransferHandler(){
+        @Override
+        public boolean canImport(TransferSupport support) {
+            return support.isDataFlavorSupported(DataFlavor.javaFileListFlavor);
+        }
+
+        @Override
+        public boolean importData(TransferSupport support) {
+            if (!canImport(support)) {
+                return false;
+            }
+
+            Transferable t = support.getTransferable();
+
+            try {
+                List<File> l = (List<File>)t.getTransferData(DataFlavor.javaFileListFlavor);
+                System.out.println("list: " + l);
+//                for (File f : l) {
+//                    new Doc(f);
+//                }
+            } catch (UnsupportedFlavorException | IOException e) {
+                return false;
+            }
+
+            return true;
+        }
+    };
 
     public MidiGui() {
         initLookAndFeel();
@@ -44,6 +74,7 @@ public class MidiGui implements MidiUi {
         frame = new JFrame("CMIDI");
         frame.setSize(350,580);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setTransferHandler(transferHandler);
 
         var channels = midiController.getChannels();
         JPanel mainPanel = new JPanel();
@@ -99,6 +130,12 @@ public class MidiGui implements MidiUi {
 
     private void refreshComponentState(Midi midi) {
         songBar.setText("Now playing: " + (new File(midi.filename)).getName());
+        for (var menu : programMenus)
+            menu.getMenu(0).setText("");
+        for (int i = 0; i < midiController.getChannels().length; i++) {
+            var ch = midiController.getChannels()[i];
+            muteButtons[ch.channel - 1].setEnabled(ch.used);
+        }
     }
 
     private JComponent createFileMenu() {
@@ -121,6 +158,11 @@ public class MidiGui implements MidiUi {
         checkbox.addActionListener(event -> midiController.toggleCurrentMidiLooping());
         checkbox.setFocusPainted(false);
         buttonPanel.add(checkbox);
+
+        var area = new JTextField();
+        area.setText("Drag to open here");
+        area.setDragEnabled(true);
+        buttonPanel.add(area);
 
         return buttonPanel;
     }
@@ -162,13 +204,13 @@ public class MidiGui implements MidiUi {
 
     @SuppressWarnings("rawtypes")
     private JMenuBar createProgramMenu(MidiChannel midiChannel) {
-        Map<String, Object> menuMap = FileIo.getGmMidiJsonStringMapFromResources();
         JMenuBar menuBar = new JMenuBar();
         menuBar.setPreferredSize(new Dimension(180, 200));
         String initialInstrumentName = midiChannel.used ? midiChannel.getCurrentGmProgramName() : "";
         JMenu rootMenu = new JMenu(initialInstrumentName);
         rootMenu.setPreferredSize(new Dimension(180, 200));
         menuBar.add(rootMenu);
+        Map<String, Object> menuMap = FileIo.getGmMidiJsonStringMapFromResources();
         for (var entrySet : menuMap.entrySet()) {
             String groupName = entrySet.getKey();
             JMenu groupMenu = new JMenu(groupName);

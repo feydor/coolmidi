@@ -3,7 +3,6 @@ package io.feydor.util;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
-import io.feydor.ui.MidiController;
 
 import javax.swing.*;
 import java.io.*;

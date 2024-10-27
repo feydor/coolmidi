@@ -3,6 +3,7 @@ package io.feydor;
 import io.feydor.midi.Midi;
 import io.feydor.ui.*;
 import io.feydor.ui.impl.*;
+import io.feydor.ui.impl.gui.DefaultMidiGui;
 
 import javax.sound.midi.MidiSystem;
 import javax.sound.midi.MidiUnavailableException;
@@ -61,11 +62,15 @@ public final class MidiCliPlayer {
         }
 
         MidiCliPlayer player = new MidiCliPlayer(input, uiOption, verbose);
-        player.playAndBlock(loop);
+        if (input.exists())
+            player.playAndBlock(loop);
+        else
+            player.waitForInput();
     }
 
     public MidiCliPlayer(File file, MidiCliOption uiOption, boolean verbose) throws MidiUnavailableException {
-        MidiUi ui = new MidiGui();
+
+        MidiUi ui = file.exists() ? new MidiGui() : new DefaultMidiGui();
 //        MidiUi ui = switch (uiOption) {
 //            case TUI_UI -> new MidiTuiUi();
 //            case TRACKER_UI -> new MidiTrackerUi();

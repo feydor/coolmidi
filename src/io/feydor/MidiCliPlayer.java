@@ -1,23 +1,11 @@
 package io.feydor;
 
-import io.feydor.midi.Midi;
 import io.feydor.ui.*;
-import io.feydor.ui.impl.*;
 import io.feydor.ui.impl.gui.DefaultMidiGui;
 
-import javax.sound.midi.MidiSystem;
 import javax.sound.midi.MidiUnavailableException;
 import java.io.File;
-import java.io.IOException;
-import java.util.*;
 
-enum MidiCliOption {
-    NO_UI,
-    TRACKER_UI,
-    TUI_UI,
-    CHANNEL_UI,
-    STATUS_LINE_UI
-}
 
 /**
  * Plays a list of MIDI files using the OS's default MIDI synthesizer and displays a CLI UI with the current notes
@@ -26,16 +14,18 @@ enum MidiCliOption {
  * <p>Usage: java MidiCliPlayer file1.mid file2.mid</p>
  */
 public final class MidiCliPlayer {
-    private final MidiScheduler midiScheduler;
+    private final MidiController midiController;
+
+    enum MidiCliOption {
+        NO_UI,
+        TRACKER_UI,
+        TUI_UI,
+        CHANNEL_UI,
+        STATUS_LINE_UI
+    }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args[0].isBlank()) {
-            printOptions();
-            System.exit(1);
-            return;
-        }
-
-        File input = null;
+        File input = new File("does not exist");
         var uiOption = MidiCliOption.STATUS_LINE_UI;
         boolean verbose = false, loop = false;
         for (var arg : args) {
@@ -62,43 +52,20 @@ public final class MidiCliPlayer {
         }
 
         MidiCliPlayer player = new MidiCliPlayer(input, uiOption, verbose);
-        if (input.exists())
-            player.playAndBlock(loop);
-        else
-            player.waitForInput();
+        if (input.exists()) {
+            player.midiController.loadMidiFile(input);
+            player.midiController.initUi(null);
+            player.midiController.startPlaybackFromBeginning();
+            player.midiController.waitForInput();
+        } else {
+            player.midiController.initUi(null);
+            player.midiController.waitForInput();
+        }
     }
 
     public MidiCliPlayer(File file, MidiCliOption uiOption, boolean verbose) throws MidiUnavailableException {
-
-        MidiUi ui = file.exists() ? new MidiGui() : new DefaultMidiGui();
-//        MidiUi ui = switch (uiOption) {
-//            case TUI_UI -> new MidiTuiUi();
-//            case TRACKER_UI -> new MidiTrackerUi();
-//            case STATUS_LINE_UI -> new MidiStatusLineUi();
-//            case CHANNEL_UI -> new MidiChannelUi();
-//            case NO_UI -> new MidiGui();
-//        };
-
-        this.midiScheduler = new MidiScheduler(ui, file, verbose);
-    }
-
-    public void playAndBlock(boolean loop) throws Exception {
-        midiScheduler.scheduleEventsAndWait(loop);
-    }
-
-    private static List<File> parseFiles(String filename) {
-        if (!filename.isBlank() && filename.charAt(0) != '-') {
-            File file = new File(filename);
-            if (file.isDirectory()) {
-                System.out.println("Found dir: " + file.getAbsolutePath());
-                File[] dirFiles = file.listFiles((dir, name) -> name.toLowerCase().matches("^.*\\.(midi|mid)$"));
-                if (dirFiles != null)
-                    return List.of(dirFiles);
-            } else {
-                return List.of(file);
-            }
-        }
-        return List.of();
+        IMidiUi ui = new DefaultMidiGui();
+        midiController = new MidiController(ui, verbose);
     }
 
     private static void printOptions() {

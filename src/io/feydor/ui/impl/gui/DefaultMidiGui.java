@@ -1,8 +1,8 @@
 package io.feydor.ui.impl.gui;
 
 import io.feydor.midi.Midi;
+import io.feydor.ui.IMidiUi;
 import io.feydor.ui.MidiController;
-import io.feydor.ui.MidiUi;
 import io.feydor.util.FileIo;
 
 import javax.swing.*;
@@ -10,64 +10,50 @@ import javax.swing.border.BevelBorder;
 import javax.swing.border.EtchedBorder;
 import javax.swing.border.SoftBevelBorder;
 import java.awt.*;
-import java.awt.datatransfer.DataFlavor;
-import java.awt.datatransfer.Transferable;
-import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.ActionEvent;
 import java.io.File;
-import java.io.IOException;
-import java.util.List;
 
-public class DefaultMidiGui implements MidiUi {
+public class DefaultMidiGui implements IMidiUi {
     private JFrame frame;
     private MidiController midiController;
     private JFileChooser fileChooser;
 
     @Override
-    public void block(Midi midi, MidiController midiController) throws Exception {
+    public void initialize(Midi midi, MidiController midiController) {
+        initLookAndFeel();
         this.midiController = midiController;
         frame = new JFrame("CMIDI");
         frame.setSize(350,580);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setJMenuBar(createFileMenu(false));
-        frame.getContentPane().add(createDraggableArea(), BorderLayout.NORTH);
+        frame.getContentPane().add(new NoMidiPanel(this::newFileHandler));
         frame.setVisible(true);
     }
 
-    private JTextArea createDraggableArea() {
-        var area = new JTextArea();
-        area.setText("Drag to open a midi file");
-        area.setTransferHandler(new TransferHandler(){
-            @Override
-            public boolean canImport(TransferSupport support) {
-                return support.isDataFlavorSupported(DataFlavor.javaFileListFlavor);
+    public void newFileHandler(File file) {
+        System.out.println("Opening: " + file.getAbsolutePath());
+        try {
+            midiController.loadMidiFile(file);
+            if (!midiController.isPlaying()) {
+                frame.setJMenuBar(createFileMenu(true));
+                // TODO: Enable the file menu again
+            } else {
+                // TODO: fix
+                midiController.replaceCurrentlyPlaying(file);
             }
 
-            @Override
-            public boolean importData(TransferSupport support) {
-                if (!canImport(support)) {
-                    return false;
-                }
-
-                Transferable t = support.getTransferable();
-
-                try {
-                    java.util.List<File> l = (List<File>)t.getTransferData(DataFlavor.javaFileListFlavor);
-                    System.out.println("list: " + l);
-//                for (File f : l) {
-//                    new Doc(f);
-//                }
-                } catch (UnsupportedFlavorException | IOException e) {
-                    return false;
-                }
-
-                return true;
-            }
-        });
-        return area;
+            midiController.startPlaybackFromBeginning();
+            frame.getContentPane().removeAll();
+            var newContentPane = new PlayingMidiPanel(midiController.getCurrentlyPlaying(), midiController, this::newFileHandler);
+            frame.getContentPane().add(newContentPane);
+        } catch (Exception ex) {
+            ex.printStackTrace(System.err);
+            throw new RuntimeException(ex);
+        }
     }
 
     private JMenuBar createFileMenu(boolean playingAFile) {
+        fileChooser = new JFileChooser();
         var openButton = new JButton("Open", FileIo.createImageIcon("images/Open16.gif"));
         openButton.setMaximumSize(new Dimension(100, 100));
         openButton.addActionListener(this::handleOpenFileChooser);
@@ -94,12 +80,7 @@ public class DefaultMidiGui implements MidiUi {
         int returnVal = fileChooser.showOpenDialog(frame);
         if (returnVal == JFileChooser.APPROVE_OPTION) {
             File file = fileChooser.getSelectedFile();
-            System.out.println("Opening: " + file.getAbsolutePath());
-            try {
-                midiController.replaceCurrentlyPlaying(file);
-            } catch (IOException ex) {
-                throw new RuntimeException(ex);
-            }
+            newFileHandler(file);
         } else {
             System.out.println("Open command cancelled by user");
         }
@@ -124,5 +105,16 @@ public class DefaultMidiGui implements MidiUi {
             }
         });
         return playButton;
+    }
+
+    private static void initLookAndFeel() {
+        try {
+            // "com.sun.java.swing.plaf.motif.MotifLookAndFeel"
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+        } catch (Exception ex) {
+            System.err.println(ex.getLocalizedMessage());
+            ex.printStackTrace(System.err);
+        }
+        JFrame.setDefaultLookAndFeelDecorated(true);
     }
 }

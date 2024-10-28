@@ -13,6 +13,7 @@ import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.locks.LockSupport;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
@@ -20,8 +21,7 @@ import java.util.stream.Stream;
 import static io.feydor.midi.Midi.MidiChunk.Event.assertValidChannel;
 
 public class MidiController implements Closeable {
-    private static final Logger LOGGER = Logger.getLogger(MidiController.class.getName());
-
+    private final IMidiUi midiUi;
     private final MidiScheduler midiScheduler;
     private final List<Midi> midiPlaylist;
     private final MidiChannel[] channels;
@@ -35,28 +35,60 @@ public class MidiController implements Closeable {
     private final BlockingQueue<Midi.MidiChunk.Event> pendingMidiEvents = new LinkedBlockingQueue<>();
     private final BlockingQueue<MidiChannelEvent> pendingChannelEvents = new ArrayBlockingQueue<>(16);
     private static final String MID_EXT_REGEX = "^.*\\.(mid|midi)$";
+    private static final Logger LOGGER = Logger.getLogger(MidiController.class.getName());
 
     public record MidiChannelEvent(MidiChannel channel, MidiEventSubType eventSubType) {}
 
-    public MidiController(MidiScheduler midiScheduler, boolean verbose) throws MidiUnavailableException {
+    public MidiController(IMidiUi midiUi, boolean verbose) throws MidiUnavailableException {
         // Get the default MIDI device and its receiver
         if (verbose) {
             var devices = MidiSystem.getMidiDeviceInfo();
             LOGGER.log(Level.INFO, "Available devices: {0}\n", Arrays.toString(devices));
         }
 
+        this.midiUi = midiUi;
+        this.midiScheduler = new MidiScheduler(this, verbose);
         this.verbose = verbose;
         this.midiPlaylist = new ArrayList<>();
         this.receiver = MidiSystem.getReceiver();
         this.channels = new MidiChannel[16];
         this.currentMidiIndex = -1;
-//        refreshChannels(midiPlaylist.get(0));
     }
 
     public void loadMidiFile(File file) {
         if (!file.exists())
             throw new IllegalArgumentException("File does not exist: " + file.getAbsolutePath());
         midiPlaylist.addAll(parseMidiFiles(file));
+    }
+
+    public void startPlaybackFromBeginning() throws Exception {
+        if (midiPlaylist.isEmpty())
+            throw new IllegalStateException("Midi playlist is empty");
+        currentMidiIndex = 0;
+        Midi firstMidi = midiPlaylist.get(0);
+        refreshChannels(firstMidi);
+        isPlaying = true;
+        new Thread(() -> {
+            while (midiScheduler.isPlayingEvents())
+                Thread.onSpinWait();
+            try {
+                midiScheduler.scheduleEventsAndWait(firstMidi);
+            } catch (InterruptedException e) {
+                System.out.println("Interrupted: " + e.getMessage());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).start();
+    }
+
+    public void initUi(Midi midi) {
+        midiUi.initialize(midi, this);
+    }
+
+    /** Blocks waiting for input */
+    public void waitForInput() {
+        midiScheduler.spawnMidiControllerListeningThread(this);
+        LockSupport.park();
     }
 
     public List<Midi> parseMidiFiles(File input) {
@@ -140,10 +172,24 @@ public class MidiController implements Closeable {
     public void replaceCurrentlyPlaying(File file) throws IOException {
         LOGGER.log(Level.INFO, "Stopping play of {0}...", getCurrentlyPlaying().filename);
         Midi newMidi = new Midi(file.getAbsolutePath());
+        midiPlaylist.clear(); // TODO
         midiPlaylist.add(newMidi);
         muteAllChannels(); // Needed for smooth transition to next file
-        quitPlayingImmediately = true;
-        currentMidiLooping = false;
+//        allNotesOff();
+        try {
+            Thread.sleep(1000L);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        midiScheduler.stopAllEvents();
+//        quitPlayingImmediately = true;
+//        currentMidiLooping = false;
+    }
+
+    private void allNotesOff() {
+        for (var channel : channels)
+            if (channel.used)
+                addNoteOffEvent(channel);
     }
 
     public boolean hasQuitPlayingImmediately() {
@@ -215,6 +261,9 @@ public class MidiController implements Closeable {
         }
     }
 
+    /**
+     * Refresh the channels with the given midi file
+     */
     private synchronized void refreshChannels(Midi midi) {
         for (int j = 0; j < 16; ++j) {
             channels[j] = new MidiChannel(j + 1, midi.channelsUsed[j]);
@@ -229,7 +278,7 @@ public class MidiController implements Closeable {
      * @param event usually a midi event
      * @param parsed data parsed from the event
      */
-    public synchronized void updateChannels(Midi.MidiChunk.Event event, Midi.MidiChunk.ChannelMidiEventParseResult parsed) {
+    public synchronized void updateChannels(Midi.MidiChunk.Event event, Midi.MidiChunk.ChannelMidiEventParseResult parsed) throws InterruptedException {
         assertValidChannel((byte) parsed.channel());
         MidiChannel channel = channels[parsed.channel()];
         switch (event.subType) {
@@ -253,11 +302,11 @@ public class MidiController implements Closeable {
             case CONTROLLER -> channel.setController((byte) parsed.data1(), (byte) parsed.data2());
         }
 
-        try {
+//        try {
             pendingChannelEvents.put(new MidiChannelEvent(channel, event.subType));
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
+//        } catch (InterruptedException e) {
+//            throw new RuntimeException(e);
+//        }
     }
 
     /**
@@ -284,7 +333,7 @@ public class MidiController implements Closeable {
         return timeUntilLastEvent;
     }
 
-    public void sendEvent(Midi.MidiChunk.Event event) {
+    public void sendEvent(Midi.MidiChunk.Event event) throws InterruptedException {
         MidiMessage msg;
         try {
             msg = makeMidiMessage(event);
@@ -302,7 +351,7 @@ public class MidiController implements Closeable {
      * @return The formatted message ready to be sent
      * @throws InvalidMidiDataException When an invalid MIDI event is encountered
      */
-    private MidiMessage makeMidiMessage(Midi.MidiChunk.Event event) throws InvalidMidiDataException {
+    private MidiMessage makeMidiMessage(Midi.MidiChunk.Event event) throws InvalidMidiDataException, InterruptedException {
         return switch (event.type) {
             case MIDI -> {
                 var parsed = event.parseAsChannelMidiEvent();

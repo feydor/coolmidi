@@ -10,58 +10,78 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.LockSupport;
 
 public class MidiScheduler {
-
-    private final ExecutorService executor = Executors.newFixedThreadPool(2 * Runtime.getRuntime().availableProcessors());
-    private final MidiUi ui;
-    private final File input;
+    private final MidiController midiController;
+    private ExecutorService executor = Executors.newFixedThreadPool(2 * Runtime.getRuntime().availableProcessors());;
     private final boolean verbose;
     private volatile boolean listeningToController;
+    private volatile boolean isPlayingEvents;
+    private volatile boolean stopImmediately;
 
     record EventBatch(int relativeTicks, List<Midi.MidiChunk.Event> events) {}
 
-    public MidiScheduler(MidiUi ui, File input, boolean verbose) {
-        this.ui = ui;
-        this.input = input;
+    public MidiScheduler(MidiController midiController, boolean verbose) {
+        this.midiController = midiController;
         this.verbose = verbose;
     }
 
-    /** Play all the loaded files */
-    public void scheduleEventsAndWait(boolean loop) throws Exception {
+    /** Start playing the midi */
+    public void scheduleEventsAndWait(Midi midi) throws Exception {
         // For each MIDI file,
         // i. Extract the # of channels used into a map of channel# and its current value
         // ii. Sequence and play the file in a new thread, passing in the channels map to keep track of note values
         // iii. In the thread, display the UI
-        MidiController midiController = new MidiController(input, verbose);
-        Midi currentlyPlaying;
-        while ((currentlyPlaying = midiController.getNextMidi()) != null) {
-            System.out.println("INFO: Playing: " + currentlyPlaying.filename + "...");
-            var scheduledThreads = doSingleThreadedScheduling(currentlyPlaying, midiController);
-            ui.block(currentlyPlaying, midiController);
-            if (!listeningToController)
-                spawnMidiControllerListeningThread(midiController);
-            var futures = executor.invokeAll(scheduledThreads);
-            for (var f : futures) {
-                f.get();
-            }
+        System.out.println("INFO: Playing: " + midi.filename + "...");
+        if (executor.isShutdown()) {
+            System.out.println("INFO: Starting new thread pool with " + (2 * Runtime.getRuntime().availableProcessors()) + " threads...");
+            executor = Executors.newFixedThreadPool(2 * Runtime.getRuntime().availableProcessors());
         }
+        isPlayingEvents = true;
+        var scheduledThreads = doSingleThreadedScheduling(midi, midiController);
+        var futures = executor.invokeAll(scheduledThreads);
+        for (var f : futures) {
+            f.get();
+        }
+//        Midi currentlyPlaying;
+//        while ((currentlyPlaying = midiController.getNextMidi()) != null) {
+//            System.out.println("INFO: Playing: " + currentlyPlaying.filename + "...");
+//            var scheduledThreads = doSingleThreadedScheduling(currentlyPlaying, midiController);
+//            if (!listeningToController)
+//                spawnMidiControllerListeningThread(midiController);
+//            var futures = executor.invokeAll(scheduledThreads);
+//            for (var f : futures) {
+//                f.get();
+//            }
+//        }
 
-        midiController.close();
-        executor.shutdown();
-        System.out.println("END");
-        System.exit(0);
+//        midiController.close();
+        isPlayingEvents = false;
+        System.out.println("Finished playing");
+//        System.exit(0);
+    }
+
+    public synchronized void stopAllEvents() {
+        executor.shutdownNow();
+    }
+
+    public boolean isPlayingEvents() {
+        return isPlayingEvents;
     }
 
     private List<Callable<Object>> doSingleThreadedScheduling(Midi midi, MidiController midiController) {
         List<EventBatch> eventsByRelTicks = getEventBatchesByRelativeTicks(midi);
 
         List<Callable<Object>> scheduledThreads = new ArrayList<>();
-        scheduledThreads.add(Executors.callable(() -> scheduleEvents(midi, eventsByRelTicks, midiController)));
+        scheduledThreads.add(Executors.callable(() -> {
+            try {
+                scheduleEvents(midi, eventsByRelTicks, midiController);
+            } catch (InterruptedException e) {
+                System.out.println("doSingleThreadedScheduling: Interrupted: " + e.getMessage());
+            }
+        }));
         return scheduledThreads;
     }
 
@@ -119,7 +139,7 @@ public class MidiScheduler {
         return byRelTicks;
     }
 
-    private void scheduleEvents(Midi midi, List<EventBatch> eventsByRelTicks, MidiController midiController) {
+    private void scheduleEvents(Midi midi, List<EventBatch> eventsByRelTicks, MidiController midiController) throws InterruptedException {
         long ticks = 0;
 
         for (var eventBatch : eventsByRelTicks) {
@@ -147,7 +167,7 @@ public class MidiScheduler {
         }
     }
 
-    private void scheduleTrack(Midi midi, Midi.MidiChunk.Track track, MidiController midiController) {
+    private void scheduleTrack(Midi midi, Midi.MidiChunk.Track track, MidiController midiController) throws InterruptedException {
         long ticks = 0;
         long time = 0;
 
@@ -196,13 +216,17 @@ public class MidiScheduler {
 //        } while (elapsed < nanos);
     }
 
-    private void spawnMidiControllerListeningThread(MidiController midiController) {
+    public void spawnMidiControllerListeningThread(MidiController midiController) {
         listeningToController = true;
         executor.submit(() -> {
             // TODO: shutdown and restart on each midi track?
            while (listeningToController) {
                var event = midiController.listenForMidiEvent();
-               midiController.sendEvent(event);
+               try {
+                   midiController.sendEvent(event);
+               } catch (InterruptedException e) {
+                   System.out.println("spawnMidiControllerListeningThread: Interrupted: " + e.getMessage());
+               }
            }
         });
     }

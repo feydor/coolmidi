@@ -77,7 +77,7 @@ public class PlayingMidiPanel extends JPanel {
         button.setFocusPainted(false);
         if (!channel.used)
             button.setEnabled(false);
-        button.addActionListener(_ -> {
+        button.addActionListener(unused -> {
             if (!midiController.isPlaying()) {
                 button.setSelected(true);
                 return;

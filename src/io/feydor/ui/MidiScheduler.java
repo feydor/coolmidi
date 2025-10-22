@@ -15,7 +15,7 @@ import java.util.concurrent.locks.LockSupport;
 
 public class MidiScheduler {
     private final MidiController midiController;
-    private ExecutorService executor = Executors.newFixedThreadPool(2 * Runtime.getRuntime().availableProcessors());;
+    private ExecutorService executor = Executors.newFixedThreadPool(2 * Runtime.getRuntime().availableProcessors());
     private final boolean verbose;
     private volatile boolean listeningToController;
     private volatile boolean isPlayingEvents;
